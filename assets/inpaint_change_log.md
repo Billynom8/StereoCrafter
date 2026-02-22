@@ -1,5 +1,12 @@
 # Inpainting GUI Change Log
 
+## Version 26-02-22.0
+
+- **Temporal Cross-Fading**: Implemented linear temporal blending between segment chunks. Transitions are now smooth instead of abrupt "hard cuts" at overlap boundaries.
+- **Improved Chunk Continuity**: The transition blend is included in mid-inference checkpoints, ensuring continuity is preserved even after a stop/resume.
+
+---
+
 ## Version 26-02-21.0
 
 ### Added

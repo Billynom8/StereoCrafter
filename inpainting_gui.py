@@ -37,7 +37,7 @@ from pipelines.stereo_video_inpainting import (
     load_inpainting_pipeline
 )
 
-GUI_VERSION = "26-02-21.0"
+GUI_VERSION = "26-02-22.0"
 
 # torch.backends.cudnn.benchmark = True
 
@@ -2565,11 +2565,38 @@ class InpaintingGUI(ThemedTk):
                 ]).cpu()
                 self._save_debug_image(current_chunk_generated, f"07_inpainted_chunk_{i}", base_video_name, i)
 
-                # Append only the "new" frames
+                # Append frames with temporal cross-fade in the overlap region
                 if i == 0:
-                    append_chunk = current_chunk_generated[:actual_sliced_length].clone()
+                    # For the first chunk, if there are more chunks following, we leave the 
+                    # overlap tail to be blended and appended by the next chunk.
+                    if i + stride + overlap < total_frames_to_process_actual:
+                        append_chunk = current_chunk_generated[:stride].clone()
+                    else:
+                        append_chunk = current_chunk_generated[:actual_sliced_length].clone()
                 else:
-                    append_chunk = current_chunk_generated[overlap:actual_sliced_length].clone()
+                    # For subsequent chunks, we blend the overlap region with the previous chunk's tail
+                    if overlap > 0 and previous_chunk_output_frames is not None:
+                        # Linear ramp for the cross-fade: 100% prev at start, 100% curr at end
+                        weights = torch.linspace(0.0, 1.0, overlap, device=current_chunk_generated.device).view(-1, 1, 1, 1)
+                        prev_overlap = previous_chunk_output_frames[-overlap:]
+                        curr_overlap = current_chunk_generated[:overlap]
+                        blended_overlap = (1.0 - weights) * prev_overlap + weights * curr_overlap
+                        
+                        # Determine the rest of the frames to append from this chunk.
+                        # Check if this is effectively the last chunk (the next would be skipped)
+                        next_i = i + stride
+                        is_last = (next_i >= total_frames_to_process_actual) or (total_frames_to_process_actual - next_i <= overlap)
+                        
+                        if is_last:
+                            rest_of_chunk = current_chunk_generated[overlap:actual_sliced_length]
+                        else:
+                            rest_of_chunk = current_chunk_generated[overlap:stride]
+                        
+                        append_chunk = torch.cat([blended_overlap, rest_of_chunk], dim=0).clone()
+                    else:
+                        # Fallback for overlap=0 or missing previous frames
+                        append_chunk = current_chunk_generated[overlap:actual_sliced_length].clone()
+                
                 results.append(append_chunk)
 
                 self._save_chunk_checkpoint(
