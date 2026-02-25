@@ -1091,6 +1091,8 @@ class MergingGUI(ThemedTk):
         self.update_status_label(message)
         self.progress_var.set(0)
         self._clear_border_info()
+        if hasattr(self, "previewer"):
+            self.previewer.reset_video_list_scan()
 
         # --- NEW: Schedule VRAM release after a short delay to ensure stability ---
         delay_ms = 2000  # 2 seconds
