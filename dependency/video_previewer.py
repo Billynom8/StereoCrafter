@@ -646,28 +646,35 @@ class VideoPreviewer(ttk.Frame):
                 self.on_slider_release(None)
 
     def _handle_load_refresh(self):
-        """Internal handler for the 'Load/Refresh List' button."""
+        """Internal handler for the 'Load/Refresh List' button.
+        Performs a full scan if the list hasn't been scanned yet, or if the current
+        selection appears invalid (e.g. files moved).
+        """
         self._stop_playback()
 
-        if not self._video_list_scanned:
-            # First press: do a full scan
+        # Determine if we should force a rescan.
+        # Logic: If we have no videos, or if the current one doesn't exist anymore (likely moved during batch).
+        force_rescan = not self.video_list
+        if not force_rescan and self.current_video_index >= 0:
+            current_paths = self.video_list[self.current_video_index]
+            main_path = current_paths.get("source_video")
+            if main_path and not os.path.exists(main_path):
+                logger.debug(f"Refresh: Current video missing ({main_path}), forcing rescan.")
+                force_rescan = True
+
+        if not self._video_list_scanned or force_rescan:
             if self.find_sources_callback:
                 self.load_video_list(find_sources_callback=self.find_sources_callback)
                 self._video_list_scanned = True
             else:
                 logger.error(
-                    "VideoPreviewer: 'find_sources_callback' was not provided during initialization. Cannot load video list."
-                )
-                messagebox.showerror(
-                    "Initialization Error",
-                    "The 'find_sources_callback' was not provided to the previewer.",
+                    "VideoPreviewer: 'find_sources_callback' was not provided. Cannot load video list."
                 )
         else:
-            # Subsequent presses: just refresh the preview without rescanning
+            # Subsequent presses: just refresh the preview from the existing list (fast)
             if self.video_list and self.current_video_index >= 0:
                 self._load_preview_by_index(self.current_video_index)
             elif self.find_sources_callback:
-                # Fallback: if video_list is empty, do a full scan
                 self.load_video_list(find_sources_callback=self.find_sources_callback)
                 self._video_list_scanned = True
 
