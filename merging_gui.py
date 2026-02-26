@@ -39,7 +39,7 @@ from dependency.stereocrafter_util import (
 )
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-08.3"
+GUI_VERSION = "26-02-25.0"
 
 
 # --- MASK PROCESSING FUNCTIONS (from test.py) ---
@@ -1091,6 +1091,8 @@ class MergingGUI(ThemedTk):
         self.update_status_label(message)
         self.progress_var.set(0)
         self._clear_border_info()
+        if hasattr(self, "previewer"):
+            self.previewer.reset_video_list_scan()
 
         # --- NEW: Schedule VRAM release after a short delay to ensure stability ---
         delay_ms = 2000  # 2 seconds

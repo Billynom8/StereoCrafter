@@ -87,7 +87,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-21.0"
+GUI_VERSION = "26-02-25.0"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -222,7 +222,9 @@ class SplatterGUI(ThemedTk):
 
         self.dark_mode_var = tk.BooleanVar(value=False)
         self.input_source_clips_var = tk.StringVar(value="./input_source_clips")
+        self.input_source_clips_var.trace_add("write", lambda *args: self.previewer.reset_video_list_scan() if hasattr(self, "previewer") else None)
         self.input_depth_maps_var = tk.StringVar(value="./input_depth_maps")
+        self.input_depth_maps_var.trace_add("write", lambda *args: (self._on_depth_map_folder_changed(), self.previewer.reset_video_list_scan() if hasattr(self, "previewer") else None))
         self.multi_map_var = tk.BooleanVar(value=False)
         self.selected_depth_map_var = tk.StringVar(value="")
         self.depth_map_subfolders = []
@@ -231,8 +233,6 @@ class SplatterGUI(ThemedTk):
         self._current_video_sidecar_map = None
         self._suppress_sidecar_map_update = False
         self._last_loaded_source_video = None
-
-        self.input_depth_maps_var.trace_add("write", lambda *args: self._on_depth_map_folder_changed())
         self.output_splatted_var = tk.StringVar(value="./output_splatted")
         self.max_disp_var = tk.StringVar(value=defaults["MAX_DISP"])
         self.process_length_var = tk.StringVar(value=defaults["PROC_LENGTH"])
@@ -1071,6 +1071,8 @@ class SplatterGUI(ThemedTk):
                     self.progress_var.set(0)
                     # --- NEW: Enable all inputs at finish ---
                     self._set_input_state("normal")
+                    if hasattr(self, "previewer"):
+                        self.previewer.reset_video_list_scan()
                     logger.info(f"==> All process completed.")
                     break
 
@@ -3973,6 +3975,8 @@ class SplatterGUI(ThemedTk):
 
         if restored_count > 0 or errors_count > 0:
             self.clear_processing_info()
+            if hasattr(self, "previewer"):
+                self.previewer.reset_video_list_scan()
             self.status_label.config(text=f"Restore complete: {restored_count} files moved, {errors_count} errors.")
             messagebox.showinfo(
                 "Restore Complete",
@@ -4030,6 +4034,8 @@ class SplatterGUI(ThemedTk):
                     logger.error(f"Error moving '{filename}': {e}")
 
         self.clear_processing_info()
+        if hasattr(self, "previewer"):
+            self.previewer.reset_video_list_scan()
         self.status_label.config(text=f"Moved {moved_count} sidecars, {errors_count} errors.")
         messagebox.showinfo("Complete", f"Sidecars moved: {moved_count}\nErrors: {errors_count}")
 
