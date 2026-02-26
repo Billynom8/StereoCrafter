@@ -87,7 +87,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-25.0"
+GUI_VERSION = "26-02-26.0"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -3303,132 +3303,35 @@ class SplatterGUI(ThemedTk):
         Unified depth processor. Pre-processes filters in float space.
         Gamma is now unified to occur in normalized space.
         """
-        if batch_depth_numpy_raw.ndim == 4 and batch_depth_numpy_raw.shape[-1] == 3:
-            batch_depth_numpy = batch_depth_numpy_raw.mean(axis=-1)
-        else:
-            batch_depth_numpy = (
-                batch_depth_numpy_raw.squeeze(-1) if batch_depth_numpy_raw.ndim == 4 else batch_depth_numpy_raw
-            )
-
-        batch_depth_numpy_float = batch_depth_numpy.astype(np.float32)
-
         # Dev Tools: allow skipping ALL low-res preprocessing (gamma/dilate/blur)
+        skip_preprocessing = False
         if (
             is_low_res_task
             and getattr(self, "skip_lowres_preproc_var", None) is not None
             and self.skip_lowres_preproc_var.get()
         ):
-            return batch_depth_numpy_float
+            skip_preprocessing = True
 
-        # Apply Filters BEFORE Gamma (Standard pipeline)
-        current_width = (
-            batch_depth_numpy_raw.shape[2] if batch_depth_numpy_raw.ndim == 4 else batch_depth_numpy_raw.shape[1]
+        try:
+            mix_f = float(self.depth_blur_left_mix_var.get())
+        except Exception:
+            mix_f = 0.5
+            
+        from core.splatting.depth_processing import process_depth_batch
+        
+        return process_depth_batch(
+            batch_depth_numpy_raw=batch_depth_numpy_raw,
+            depth_gamma=depth_gamma,
+            depth_dilate_size_x=depth_dilate_size_x,
+            depth_dilate_size_y=depth_dilate_size_y,
+            depth_blur_size_x=depth_blur_size_x,
+            depth_blur_size_y=depth_blur_size_y,
+            max_raw_value=max_raw_value,
+            depth_dilate_left=depth_dilate_left,
+            depth_blur_left=depth_blur_left,
+            depth_blur_left_mix=mix_f,
+            skip_preprocessing=skip_preprocessing,
         )
-        res_scale = math.sqrt(current_width / 960.0)
-
-        def map_val(v):
-            f_v = float(v)
-            # Backward compatibility: older configs stored erosion as 30..40 => -0..-10
-            if f_v > 30.0 and f_v <= 40.0:
-                return -(f_v - 30.0)
-            return f_v
-
-        render_dilate_x = map_val(depth_dilate_size_x) * res_scale
-        render_dilate_y = map_val(depth_dilate_size_y) * res_scale
-        render_blur_x = depth_blur_size_x * res_scale
-        render_blur_y = depth_blur_size_y * res_scale
-        render_dilate_left = float(depth_dilate_left) * res_scale
-        render_blur_left = float(depth_blur_left) * res_scale
-
-        if (
-            abs(render_dilate_left) > 1e-5
-            or render_blur_left > 0
-            or abs(render_dilate_x) > 1e-5
-            or abs(render_dilate_y) > 1e-5
-            or render_blur_x > 0
-            or render_blur_y > 0
-        ):
-            device = torch.device("cpu")
-            tensor_4d = torch.from_numpy(batch_depth_numpy_float).unsqueeze(1).to(device)
-            # Left-only pre-step (directional): applied before normal X/Y dilate/blur to preserve parity
-
-            # Dilate Left (directional) - optional
-            if abs(render_dilate_left) > 1e-5:
-                tensor_before = tensor_4d
-                tensor_4d = custom_dilate_left(tensor_before, float(render_dilate_left), False, max_raw_value)
-
-            if render_blur_left > 0:
-                # Blur Left: blur *only* along strong left edges (dark->bright when moving left->right).
-                # This avoids blurring smooth gradients that typically don't create warp/splat jaggies.
-                effective_max_value = max(max_raw_value, 1e-5)
-                EDGE_STEP_8BIT = 3.0  # raise to blur fewer edges; lower to blur more edges
-                step_thresh = effective_max_value * (EDGE_STEP_8BIT / 255.0)
-
-                dx = tensor_4d[:, :, :, 1:] - tensor_4d[:, :, :, :-1]
-                edge_core = dx > step_thresh
-
-                edge_mask = torch.zeros_like(tensor_4d, dtype=torch.float32)
-                edge_mask[:, :, :, 1:] = edge_core.float()
-
-                # Expand into a small band around the edge (both sides) so it feels like a normal blur (no hard cut-off).
-                k_blur = int(round(render_blur_left))
-                if k_blur <= 0:
-                    k_blur = 1
-                if k_blur % 2 == 0:
-                    k_blur += 1
-
-                # Keep the band relatively tight around the detected edge so we don't soften large interior regions.
-                band_half = max(1, int(math.ceil(k_blur / 4.0)))
-                edge_band = (
-                    F.max_pool2d(edge_mask, kernel_size=(1, 2 * band_half + 1), stride=1, padding=(0, band_half)) > 0.5
-                ).float()
-
-                # Feather the band so the blend ramps on/off smoothly.
-                alpha = custom_blur(edge_band, 7, 1, False, 1.0)
-                alpha = torch.clamp(alpha, 0.0, 1.0)
-
-                # Two-pass blur for Blur Left:
-                # - Horizontal-only blur helps anti-alias along X (like your regular Blur X behavior),
-                # - Vertical-only blur helps smooth stair-steps along the edge.
-                # We blend horizontal/vertical Blur Left based on a compact UI selector:
-                #   0.0 = all horizontal, 1.0 = all vertical, 0.5 = 50/50.
-                try:
-                    mix_f = float(self.depth_blur_left_mix_var.get())
-                except Exception:
-                    mix_f = 0.5
-                mix_f = max(0.0, min(1.0, mix_f))
-
-                BLUR_LEFT_V_WEIGHT = mix_f
-                BLUR_LEFT_H_WEIGHT = 1.0 - mix_f
-
-                blurred_h = None
-                blurred_v = None
-                if BLUR_LEFT_H_WEIGHT > 1e-6:
-                    blurred_h = custom_blur(tensor_4d, k_blur, 1, False, max_raw_value)
-                if BLUR_LEFT_V_WEIGHT > 1e-6:
-                    blurred_v = custom_blur(tensor_4d, 1, k_blur, False, max_raw_value)
-
-                if blurred_h is not None and blurred_v is not None:
-                    wsum = BLUR_LEFT_H_WEIGHT + BLUR_LEFT_V_WEIGHT
-                    blurred = (blurred_h * BLUR_LEFT_H_WEIGHT + blurred_v * BLUR_LEFT_V_WEIGHT) / max(wsum, 1e-6)
-                elif blurred_h is not None:
-                    blurred = blurred_h
-                elif blurred_v is not None:
-                    blurred = blurred_v
-                else:
-                    blurred = tensor_4d
-
-                tensor_4d = tensor_4d * (1.0 - alpha) + blurred * alpha
-            if abs(render_dilate_x) > 1e-5 or abs(render_dilate_y) > 1e-5:
-                tensor_4d = custom_dilate(
-                    tensor_4d, float(render_dilate_x), float(render_dilate_y), False, max_raw_value
-                )
-            if render_blur_x > 0 or render_blur_y > 0:
-                tensor_4d = custom_blur(tensor_4d, float(render_blur_x), float(render_blur_y), False, max_raw_value)
-            batch_depth_numpy_float = tensor_4d.squeeze(1).cpu().numpy()
-            release_cuda_memory()
-
-        return batch_depth_numpy_float
 
     def _preview_processing_callback(self, source_frames: dict, params: dict) -> Optional[Image.Image]:
         """
