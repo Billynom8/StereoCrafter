@@ -322,6 +322,50 @@ def process_depth_batch(
     return batch_depth_numpy_float
 
 
+def normalize_and_gamma_depth(
+    batch_depth_numpy_raw: np.ndarray,
+    assume_raw_input: bool,
+    global_depth_max: float,
+    global_depth_min: float,
+    max_expected_raw_value: float,
+    zero_disparity_anchor_val: float,
+    depth_gamma: float,
+) -> np.ndarray:
+    """Normalizes and applies gamma to a batch of raw depth frames."""
+    if batch_depth_numpy_raw.ndim == 4 and batch_depth_numpy_raw.shape[-1] == 3:
+        batch_depth_gray = batch_depth_numpy_raw.mean(axis=-1)
+    elif batch_depth_numpy_raw.ndim == 4 and batch_depth_numpy_raw.shape[-1] == 1:
+        batch_depth_gray = batch_depth_numpy_raw.squeeze(-1)
+    else:
+        batch_depth_gray = batch_depth_numpy_raw
+    
+    batch_depth_float = batch_depth_gray.astype(np.float32)
+    
+    if assume_raw_input:
+        if global_depth_max > 1.0:
+            batch_depth_normalized = batch_depth_float / global_depth_max
+        else:
+            batch_depth_normalized = batch_depth_float / max(max_expected_raw_value, 1.0)
+    else:
+        depth_range = global_depth_max - global_depth_min
+        if depth_range > 1e-5:
+            batch_depth_normalized = (batch_depth_float - global_depth_min) / depth_range
+        else:
+            batch_depth_normalized = np.full_like(
+                batch_depth_float,
+                fill_value=zero_disparity_anchor_val,
+                dtype=np.float32,
+            )
+    
+    batch_depth_normalized = np.clip(batch_depth_normalized, 0.0, 1.0)
+    
+    if round(float(depth_gamma), 2) != 1.0:
+        batch_depth_normalized = 1.0 - np.power(1.0 - batch_depth_normalized, depth_gamma)
+        batch_depth_normalized = np.clip(batch_depth_normalized, 0.0, 1.0)
+        
+    return batch_depth_normalized
+
+
 def compute_global_depth_stats(
     depth_map_reader: VideoReader,
     total_frames: int,

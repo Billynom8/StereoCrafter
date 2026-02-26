@@ -24,7 +24,7 @@ from dependency.stereocrafter_util import (
     draw_progress_bar,
 )
 from .forward_warp import ForwardWarpStereo
-from .depth_processing import process_depth_batch
+from .depth_processing import process_depth_batch, normalize_and_gamma_depth
 
 logger = logging.getLogger(__name__)
 
@@ -179,52 +179,17 @@ class RenderProcessor:
                 batch_depth_numpy_raw = depth_map_reader.get_batch(batch_indices).asnumpy()
 
                 # 2. Normalize and apply gamma (BEFORE dilation/blur)
-                # Convert to grayscale if needed
-                if batch_depth_numpy_raw.ndim == 4 and batch_depth_numpy_raw.shape[-1] == 3:
-                    batch_depth_gray = batch_depth_numpy_raw.mean(axis=-1)
-                elif batch_depth_numpy_raw.ndim == 4 and batch_depth_numpy_raw.shape[-1] == 1:
-                    batch_depth_gray = batch_depth_numpy_raw.squeeze(-1)
-                else:
-                    batch_depth_gray = batch_depth_numpy_raw
+                batch_depth_normalized = normalize_and_gamma_depth(
+                    batch_depth_numpy_raw=batch_depth_numpy_raw,
+                    assume_raw_input=assume_raw_input,
+                    global_depth_max=global_depth_max,
+                    global_depth_min=global_depth_min,
+                    max_expected_raw_value=max_expected_raw_value,
+                    zero_disparity_anchor_val=zero_disparity_anchor_val,
+                    depth_gamma=depth_gamma,
+                )
                 
-                batch_depth_float = batch_depth_gray.astype(np.float32)
-                
-                # Debug: Log raw depth range
-                logger.debug(f"[DEPTH] Raw depth range: min={batch_depth_float.min():.2f}, max={batch_depth_float.max():.2f}, shape={batch_depth_float.shape}")
-                
-                # Normalize to 0-1 range (matches original depthSplatting logic)
-                if assume_raw_input:
-                    # Raw input mode:
-                    # If global_depth_max is > 1.0 (e.g. 255 or 1023 passed from content scan), use it.
-                    # Otherwise fallback to max_expected_raw_value from metadata.
-                    if global_depth_max > 1.0:
-                         batch_depth_normalized = batch_depth_float / global_depth_max
-                    else:
-                         batch_depth_normalized = batch_depth_float / max(max_expected_raw_value, 1.0)
-                else:
-                    # Global normalization mode
-                    depth_range = global_depth_max - global_depth_min
-                    if depth_range > 1e-5:
-                        batch_depth_normalized = (batch_depth_float - global_depth_min) / depth_range
-                    else:
-                        # Collapsed range - fill with convergence anchor value
-                        batch_depth_normalized = np.full_like(
-                            batch_depth_float,
-                            fill_value=zero_disparity_anchor_val,
-                            dtype=np.float32,
-                        )
-                        logger.warning(
-                            f"Normalization collapsed to zero range ({global_depth_min:.4f} - {global_depth_max:.4f})."
-                        )
-                
-                batch_depth_normalized = np.clip(batch_depth_normalized, 0.0, 1.0)
-                logger.debug(f"[DEPTH] After normalization: min={batch_depth_normalized.min():.4f}, max={batch_depth_normalized.max():.4f}")
-                
-                # Apply gamma correction (inverted gamma formula)
-                if round(float(depth_gamma), 2) != 1.0:
-                    batch_depth_normalized = 1.0 - np.power(1.0 - batch_depth_normalized, depth_gamma)
-                    batch_depth_normalized = np.clip(batch_depth_normalized, 0.0, 1.0)
-                    logger.debug(f"[DEPTH] After gamma {depth_gamma}: min={batch_depth_normalized.min():.4f}, max={batch_depth_normalized.max():.4f}")
+                logger.debug(f"[DEPTH] After normalization and gamma: min={batch_depth_normalized.min():.4f}, max={batch_depth_normalized.max():.4f}")
                 
                 # Convert back to "raw" format for process_depth_batch (which expects raw-like values)
                 # Scale back to max_raw_value range so dilation/blur work correctly

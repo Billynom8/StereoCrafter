@@ -87,7 +87,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-26.0"
+GUI_VERSION = "26-02-26.1"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -3523,10 +3523,26 @@ class SplatterGUI(ThemedTk):
 
         logger.debug(f"Preview: GN={enable_global_norm}. Final Scaling Factor for Pre-Proc: {final_scaling_factor:.3f}")
 
-        depth_numpy_processed = self._process_depth_batch(
+        # --- UNIFICATION STEP 2: NORMALIZE & GAMMA BEFORE DILATE/BLUR ---
+        from core.splatting.depth_processing import normalize_and_gamma_depth
+
+        batch_depth_normalized = normalize_and_gamma_depth(
             batch_depth_numpy_raw=np.expand_dims(depth_numpy_raw, axis=0),
-            depth_stream_info=None,
+            assume_raw_input=not enable_global_norm,
+            global_depth_max=global_max if enable_global_norm else final_scaling_factor,
+            global_depth_min=global_min if enable_global_norm else 0.0,
+            max_expected_raw_value=final_scaling_factor,
+            zero_disparity_anchor_val=params.get("convergence_point", 0.0),
             depth_gamma=params["depth_gamma"],
+        )
+
+        # Scale back to max_raw_value range so dilation/blur work correctly
+        batch_depth_for_processing = batch_depth_normalized * final_scaling_factor
+
+        depth_numpy_processed = self._process_depth_batch(
+            batch_depth_numpy_raw=batch_depth_for_processing,
+            depth_stream_info=None,
+            depth_gamma=1.0,
             depth_dilate_size_x=params["depth_dilate_size_x"],
             depth_dilate_size_y=params["depth_dilate_size_y"],
             depth_blur_size_x=params["depth_blur_size_x"],
@@ -3559,34 +3575,9 @@ class SplatterGUI(ThemedTk):
                     exc_info=True,
                 )
 
-        # 2. Normalize based on the 'enable_global_norm' policy
-        depth_normalized = depth_numpy_processed.squeeze(0)
-
-        # Match render behavior:
-        # - In GN mode: normalize using cached/scanned min/max
-        # - In Manual/RAW mode: scale into 0-1 using the detected scaling factor
-        if enable_global_norm:
-            min_val, max_val = global_min, global_max
-            depth_range = max_val - min_val
-            if depth_range > 1e-5:
-                depth_normalized = (depth_normalized - min_val) / depth_range
-            else:
-                depth_normalized = np.zeros_like(depth_normalized)
-        else:
-            # In manual mode, preview frames may arrive as uint8/uint16-like ranges.
-            # Scale to 0..1 (render path uses the clip's max content value for this).
-            if final_scaling_factor and final_scaling_factor > 1.0 + 1e-5:
-                depth_normalized = depth_normalized / float(final_scaling_factor)
-
+        # Normalize back to 0..1
+        depth_normalized = depth_numpy_processed.squeeze(0) / max(final_scaling_factor, 1.0)
         depth_normalized = np.clip(depth_normalized, 0, 1)
-
-        # 3. Apply the SAME gamma math as the render path (so preview == output)
-        depth_gamma_val = float(params.get("depth_gamma", 1.0))
-        if round(depth_gamma_val, 2) != 1.0:
-            # Math: 1.0 - (1.0 - depth)^gamma
-            depth_normalized = 1.0 - np.power(1.0 - np.clip(depth_normalized, 0, 1), depth_gamma_val)
-            depth_normalized = np.clip(depth_normalized, 0, 1)
-
         logger.debug(
             f"Final normalized depth shape: {depth_normalized.shape}, range: [{depth_normalized.min():.2f}, {depth_normalized.max():.2f}]"
         )

@@ -2,11 +2,12 @@
 
 All notable changes to the splatting GUI and related components.
 
-## Version 26-02-26.0
+## Version 26-02-26.1
 
 ### Fixed
 
-- **Depth Preprocessing**: Fixed issue where depth preprocessing was not in sync with the core library.
+- **Depth Preprocessing**: Fixed issue where preview depth pre-processing was using local and not the core library functions.
+- **Depth Normalization**: unified and refactored depth normalization logic between preview and batch processing.
 
 ## Version 26-02-21.0
 
