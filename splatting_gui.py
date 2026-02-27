@@ -72,7 +72,6 @@ from dependency.stereocrafter_util import (
     custom_dilate_left,
     create_single_slider_with_label_updater,
     create_dual_slider_layout,
-    SidecarConfigManager,
     apply_dubois_anaglyph,
     apply_optimized_anaglyph,
 )
@@ -87,7 +86,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-27.5"
+GUI_VERSION = "26-02-27.6"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -109,6 +108,11 @@ from core.splatting.config_manager import ConfigManager
 # [REFACTORED] Video I/O and Theme functions replaced with core imports
 from core.common import ThemeManager
 from core.common.video_io import read_video_frames, _NumpyBatch
+from core.common.sidecar_manager import (
+    SidecarConfigManager,
+    find_sidecar_file,
+    read_clip_sidecar
+)
 from core.ui.sbs_preview import SBSPreviewWindow
 
 
@@ -170,6 +174,13 @@ class SplatterGUI(ThemedTk):
         "border_mode": "BORDER_MODE",
         "auto_border_L": "AUTO_BORDER_L",
         "auto_border_R": "AUTO_BORDER_R",
+    }
+
+    # Maps Sidecar JSON Key to the actual tkinter variable attribute name
+    GUI_SIDECAR_VAR_MAP = {
+        "convergence_plane": "zero_disparity_anchor_var",
+        "max_disparity": "max_disp_var",
+        "gamma": "depth_gamma_var",
     }
     MOVE_TO_FINISHED_ENABLED = True
     # ---------------------------------------
@@ -2963,11 +2974,10 @@ class SplatterGUI(ThemedTk):
         if not depth_map_path:
             return None
 
-        depth_map_basename = os.path.splitext(os.path.basename(depth_map_path))[0]
-        sidecar_ext = self.APP_CONFIG_DEFAULTS["SIDECAR_EXT"]
-        # Use base folder for sidecars when Multi-Map is enabled
+        # Determine sidecar path using the centralized manager
         sidecar_folder = self._get_sidecar_base_folder()
-        json_sidecar_path = os.path.join(sidecar_folder, f"{depth_map_basename}{sidecar_ext}")
+        sidecar_ext = self.APP_CONFIG_DEFAULTS["SIDECAR_EXT"]
+        json_sidecar_path = self.sidecar_manager.resolve_sidecar_path(depth_map_path, sidecar_folder, sidecar_ext)
 
         # Load existing data (merged with defaults) to preserve non-GUI parameters like overlap/bias
         current_data = self.sidecar_manager.load_sidecar_data(json_sidecar_path)
@@ -5619,17 +5629,7 @@ class SplatterGUI(ThemedTk):
     def _save_current_sidecar_data(
         self, is_auto_save: bool = False, force_auto_L: Optional[float] = None, force_auto_R: Optional[float] = None
     ) -> bool:
-        """
-        Core method to prepare data and save the sidecar file.
-
-        Args:
-            is_auto_save (bool): If True, logs are DEBUG/INFO, otherwise ERROR.
-            force_auto_L (float): Explicit left auto-border value to save.
-            force_auto_R (float): Explicit right auto-border value to save.
-
-        Returns:
-            bool: True on success, False on failure.
-        """
+        """Core method to prepare data and save the sidecar file."""
         result = self._get_current_sidecar_paths_and_data()
         if result is None:
             if not is_auto_save:
@@ -5638,88 +5638,57 @@ class SplatterGUI(ThemedTk):
 
         json_sidecar_path, depth_map_path, current_data = result
 
-        # 1. Get current GUI values (the data to override/save)
+        # 1. Get current GUI values using the centralized manager
         try:
-            gui_save_data = {
-                "convergence_plane": self._safe_float(self.zero_disparity_anchor_var, 0.5),
-                "max_disparity": self._safe_float(self.max_disp_var, 20.0),
-                "gamma": float(f"{self._safe_float(self.depth_gamma_var, 1.0):.2f}"),
-                "depth_dilate_size_x": self._safe_float(self.depth_dilate_size_x_var),
-                "depth_dilate_size_y": self._safe_float(self.depth_dilate_size_y_var),
-                "depth_blur_size_x": self._safe_float(self.depth_blur_size_x_var),
-                "depth_blur_size_y": self._safe_float(self.depth_blur_size_y_var),
-                "depth_dilate_left": self._safe_float(self.depth_dilate_left_var),
-                "depth_blur_left": int(round(self._safe_float(self.depth_blur_left_var))),
-                "depth_blur_left_mix": self._safe_float(self.depth_blur_left_mix_var, 0.5),
-                "selected_depth_map": self.selected_depth_map_var.get(),
-            }
+            # Automate parameters that map directly
+            gui_save_data = self.sidecar_manager.capture_from_gui(self.__dict__, mapping=self.GUI_SIDECAR_VAR_MAP)
+            
+            # Add specific formatting/overrides
+            gui_save_data["gamma"] = float(f"{self._safe_float(self.depth_gamma_var, 1.0):.2f}")
+            gui_save_data["depth_blur_left"] = int(round(self._safe_float(self.depth_blur_left_var)))
 
-            # Convert Border Width/Bias to Left/Right for storage
+            # 2. Geometric logic (Width/Bias -> Left/Right) handled by manager
             w = self._safe_float(self.border_width_var)
             b = self._safe_float(self.border_bias_var)
-            if b <= 0:
-                left_b = w
-                right_b = w * (1.0 + b)
-            else:
-                right_b = w
-                left_b = w * (1.0 - b)
+            left_b, right_b = self.sidecar_manager.calculate_borders_from_width_bias(w, b)
+            
+            gui_save_data["left_border"] = left_b
+            gui_save_data["right_border"] = right_b
 
-            # Auto Adv values: only save if we are in that mode OR if they were forced by a scan
-            final_auto_L = force_auto_L if force_auto_L is not None else self._safe_float(self.auto_border_L_var)
-            final_auto_R = force_auto_R if force_auto_R is not None else self._safe_float(self.auto_border_R_var)
+            # 3. Auto Adv values
+            gui_save_data["auto_border_L"] = force_auto_L if force_auto_L is not None else self._safe_float(self.auto_border_L_var)
+            gui_save_data["auto_border_R"] = force_auto_R if force_auto_R is not None else self._safe_float(self.auto_border_R_var)
+            
+            # Transfer all to the final save dictionary
+            current_data.update(gui_save_data)
 
-            # If not in Auto Adv and not forced, we might want to keep the sidecar's existing values
-            # instead of overwriting with GUI 0.0s. This prevents accidental clearing.
-            mode = self.border_mode_var.get()
-            if mode != "Auto Adv." and force_auto_L is None:
-                final_auto_L = current_data.get("auto_border_L", 0.0)
-                final_auto_R = current_data.get("auto_border_R", 0.0)
+            # 4. Filter for export (preserve metric estimates)
+            if self._dp_total_max_seen is not None:
+                current_data["dp_total_max_est"] = round(float(self._dp_total_max_seen), 6)
 
-            if final_auto_L is None:
-                final_auto_L = 0.0
-            if final_auto_R is None:
-                final_auto_R = 0.0
-
-            if mode == "Off":
-                # Preserve any existing per-clip borders; do not overwrite or clear.
-                pass
-            else:
-                gui_save_data.update(
-                    {
-                        "left_border": round(left_b, 3),
-                        "right_border": round(right_b, 3),
-                        "border_mode": mode,
-                        "auto_border_L": round(final_auto_L, 3),
-                        "auto_border_R": round(final_auto_R, 3),
-                    }
-                )
-        except ValueError:
-            logger.error("Sidecar Save: Invalid input value in GUI. Skipping save.")
+        except Exception as e:
+            logger.error(f"Error during sidecar save: {e}", exc_info=True)
             if not is_auto_save:
-                messagebox.showerror("Sidecar Error", "Invalid input value in GUI. Skipping save.")
+                messagebox.showerror("Sidecar Error", f"Failed to prepare sidecar data: {e}")
             return False
 
-        # 2. Merge GUI values into current data (preserving overlap/bias)
-        current_data.update(gui_save_data)
-
-        # 3. Write the updated data back to the file using the manager
+        # 5. Write the updated data back to the file using the manager
         if self.sidecar_manager.save_sidecar_data(json_sidecar_path, current_data):
             action = "Auto-Saved" if is_auto_save else ("Updated" if os.path.exists(json_sidecar_path) else "Created")
-
             logger.info(f"{action} sidecar: {os.path.basename(json_sidecar_path)}")
             self.status_label.config(text=f"{action} sidecar.")
-
-            # Update button text in case a file was just created
             self._update_sidecar_button_text()
 
+            # If an AUTO-PASS CSV exists, keep its row in sync with sidecar edits
+            try:
+                self._auto_pass_csv_update_row_from_current()
+            except Exception:
+                pass
             return True
         else:
             logger.error(f"Sidecar Save: Failed to write sidecar file '{os.path.basename(json_sidecar_path)}'.")
             if not is_auto_save:
-                messagebox.showerror(
-                    "Sidecar Error",
-                    f"Failed to write sidecar file '{os.path.basename(json_sidecar_path)}'. Check logs.",
-                )
+                messagebox.showerror("Sidecar Error", f"Failed to write sidecar file '{os.path.basename(json_sidecar_path)}'.")
             return False
 
     def _save_debug_image(
@@ -6433,175 +6402,56 @@ class SplatterGUI(ThemedTk):
             logger.debug(f"Preview info update skipped due to error: {e}")
 
     def update_gui_from_sidecar(self, depth_map_path: str):
-        """
-        Reads the sidecar config for the given depth map path and updates the
-        Convergence, Max Disparity, and Gamma sliders.
-        """
-        # Clear suppression flag when opening a NEW video
-        # (Allow sidecar to load for the first time on new video)
-        # Get current source video to track video changes (not depth map changes)
+        """Reads the sidecar config for the given depth map path and updates GUI sliders."""
+        # 1. Video Change Detection (for suppression flag)
         current_source_video = None
-        if (
-            hasattr(self, "previewer")
-            and self.previewer
-            and 0 <= self.previewer.current_video_index < len(self.previewer.video_list)
-        ):
+        if hasattr(self, "previewer") and self.previewer and 0 <= self.previewer.current_video_index < len(self.previewer.video_list):
             current_source_video = self.previewer.video_list[self.previewer.current_video_index].get("source_video")
 
-        # Clear suppression flag when opening a NEW video (not when changing maps)
         if current_source_video and current_source_video != getattr(self, "_last_loaded_source_video", None):
             self._suppress_sidecar_map_update = False
-            self._last_loaded_source_video = current_source_video  # Track source video, not depth map
-        if not self.update_slider_from_sidecar_var.get():
-            logger.debug("update_gui_from_sidecar: Feature is toggled OFF. Skipping update.")
+            self._last_loaded_source_video = current_source_video 
+
+        if not self.update_slider_from_sidecar_var.get() or not depth_map_path:
             return
 
-        if not depth_map_path:
-            return
-
-        # 1. Determine sidecar path
-        depth_map_basename = os.path.splitext(os.path.basename(depth_map_path))[0]
+        # 2. Resolve sidecar path and load data
         sidecar_ext = self.APP_CONFIG_DEFAULTS["SIDECAR_EXT"]
-        # Use base folder for sidecars when Multi-Map is enabled
         sidecar_folder = self._get_sidecar_base_folder()
-        json_sidecar_path = os.path.join(sidecar_folder, f"{depth_map_basename}{sidecar_ext}")
-        logger.info(f"Looking for sidecar at: {json_sidecar_path}")
+        json_sidecar_path = self.sidecar_manager.resolve_sidecar_path(depth_map_path, sidecar_folder, sidecar_ext)
 
         if not os.path.exists(json_sidecar_path):
-            logger.debug(
-                f"update_gui_from_sidecar: No sidecar found at {json_sidecar_path}. Calling _on_map_selection_changed to sync preview."
-            )
-            # FIXED: When no sidecar, update previewer with currently-selected map
             self._on_map_selection_changed(from_sidecar=False)
             return
 
-        # 2. Load merged config (Sidecar values merged with defaults)
-        # We use merge to ensure we get a complete dictionary even if keys are missing
         sidecar_config = self.sidecar_manager.load_sidecar_data(json_sidecar_path)
+        logger.info(f"Updating sliders from sidecar: {os.path.basename(json_sidecar_path)}")
 
-        logger.debug(f"Updating sliders from sidecar: {os.path.basename(json_sidecar_path)}")
+        # 3. Bulk sync to GUI vars
+        self.sidecar_manager.sync_to_gui(sidecar_config, self.__dict__, mapping=self.GUI_SIDECAR_VAR_MAP)
 
-        # 3. Update Sliders Programmatically (Requires programmatic setter/updater)
-
+        # 4. Handle Programmatic Updates (sliders with coupled logic)
         # Convergence
         conv_val = sidecar_config.get("convergence_plane", self.zero_disparity_anchor_var.get())
-        self.zero_disparity_anchor_var.set(conv_val)
         if self.set_convergence_value_programmatically:
             self.set_convergence_value_programmatically(conv_val)
 
-        # Max Disparity (Simple set)
-        disp_val = sidecar_config.get("max_disparity", self.max_disp_var.get())
-        self.max_disp_var.set(disp_val)
-
-        # Gamma (Simple set)
-        gamma_val = sidecar_config.get("gamma", self.depth_gamma_var.get())
-        self.depth_gamma_var.set(gamma_val)
-
-        # Seed preview overlay "Max Total" from sidecar (most-accurate available):
-        # prefer dp_total_max_true (render-measured) else dp_total_max_est (sampled).
+        # 5. Seed preview Overlay metrics
         try:
-            dp_seed = sidecar_config.get("dp_total_max_true", None)
-            if dp_seed is None:
-                dp_seed = sidecar_config.get("dp_total_max_est", None)
-            if (
-                dp_seed is not None
-                and getattr(self, "previewer", None) is not None
-                and hasattr(self.previewer, "set_depth_pop_max_estimate")
-            ):
+            disp_val = sidecar_config.get("max_disparity", self.max_disp_var.get())
+            gamma_val = sidecar_config.get("gamma", self.depth_gamma_var.get())
+            dp_seed = sidecar_config.get("dp_total_max_true") or sidecar_config.get("dp_total_max_est")
+            if dp_seed is not None and getattr(self, "previewer", None) and hasattr(self.previewer, "set_depth_pop_max_estimate"):
                 sig = self._dp_total_signature(depth_map_path, conv_val, disp_val, gamma_val)
                 self.previewer.set_depth_pop_max_estimate(float(dp_seed), sig)
         except Exception:
             pass
 
-        # Dilate X
-        dilate_x_val = sidecar_config.get("depth_dilate_size_x", self.depth_dilate_size_x_var.get())
-        self.depth_dilate_size_x_var.set(dilate_x_val)
-
-        # Dilate Y
-        dilate_y_val = sidecar_config.get("depth_dilate_size_y", self.depth_dilate_size_y_var.get())
-        self.depth_dilate_size_y_var.set(dilate_y_val)
-
-        # Blur X
-        blur_x_val = sidecar_config.get("depth_blur_size_x", self.depth_blur_size_x_var.get())
-        self.depth_blur_size_x_var.set(blur_x_val)
-        # Blur Y
-        blur_y_val = sidecar_config.get("depth_blur_size_y", self.depth_blur_size_y_var.get())
-        self.depth_blur_size_y_var.set(blur_y_val)
-
-        # Dilate Left
-        dilate_left_val = sidecar_config.get("depth_dilate_left", self.depth_dilate_left_var.get())
-        self.depth_dilate_left_var.set(dilate_left_val)
-
-        # Blur Left (stored as integer steps; accept older float values)
-        blur_left_val = sidecar_config.get("depth_blur_left", self.depth_blur_left_var.get())
-        try:
-            self.depth_blur_left_var.set(int(round(float(blur_left_val))))
-        except Exception:
-            self.depth_blur_left_var.set(0)
-
-        # Blur Left H↔V balance (defaults to 0.5 for older sidecars)
-        mix_val = sidecar_config.get("depth_blur_left_mix", self.depth_blur_left_mix_var.get())
-        try:
-            mix_f = float(mix_val)
-            if mix_f < 0.0:
-                mix_f = 0.0
-            if mix_f > 1.0:
-                mix_f = 1.0
-            # store as one decimal string to match UI selector
-            self.depth_blur_left_mix_var.set(f"{mix_f:.1f}")
-        except Exception:
-            self.depth_blur_left_mix_var.set("0.5")
-
-        # Selected Depth Map (for Multi-Map mode)
-        if self.multi_map_var.get():
-            selected_map_val = sidecar_config.get("selected_depth_map", "")
-            if selected_map_val:
-                # Only log when we actually switch maps (reduces redundant messages).
-                _current_sel = self.selected_depth_map_var.get()
-                if selected_map_val != _current_sel:
-                    logger.info(f"Restoring depth map selection from sidecar: {selected_map_val}")
-                    self.selected_depth_map_var.set(selected_map_val)
-
-                # Ensure the current preview entry uses the sidecar-selected map (even if unchanged).
-                try:
-                    self._on_map_selection_changed(from_sidecar=True)
-                except Exception as e:
-                    logger.error(f"Failed to apply sidecar map '{selected_map_val}': {e}")
-
-                # Do not allow sidecar to override manual click after this point
-                self._suppress_sidecar_map_update = True
-
-        # --- Border Settings ---
-        self.auto_border_L_var.set(str(sidecar_config.get("auto_border_L", 0.0)))
-        self.auto_border_R_var.set(str(sidecar_config.get("auto_border_R", 0.0)))
-
-        mode = sidecar_config.get("border_mode")
-        if mode is None:
-            # Migration from older sidecars
-            if "manual_border" in sidecar_config:
-                is_manual = sidecar_config.get("manual_border", False)
-                mode = "Manual" if is_manual else "Auto Basic"
-            else:
-                # Fresh clip or non-configured sidecar: keep current mode
-                mode = self.border_mode_var.get()
-
-        self.border_mode_var.set(mode)
-
+        # 6. Border Geometry (Left/Right -> Width/Bias)
         left_b = sidecar_config.get("left_border", 0.0)
         right_b = sidecar_config.get("right_border", 0.0)
-
-        # Convert back to width/bias for the sliders
-        w = max(left_b, right_b)
-        if w > 0:
-            if left_b > right_b:
-                b = (right_b / left_b) - 1.0
-            elif right_b > left_b:
-                b = 1.0 - (left_b / right_b)
-            else:
-                b = 0.0
-        else:
-            b = 0.0
-
+        w, b = self.sidecar_manager.calculate_width_bias_from_borders(left_b, right_b)
+        
         self.border_width_var.set(f"{w:.2f}")
         self.border_bias_var.set(f"{b:.2f}")
 
@@ -6610,20 +6460,19 @@ class SplatterGUI(ThemedTk):
         if self.set_border_bias_programmatically:
             self.set_border_bias_programmatically(b)
 
-        # Ensure UI state matches restored mode
+        # 7. Post-update cleanup
         self._on_border_mode_change()
-
-        # --- FIX: Refresh slider labels after restoring sidecar values ---
         if hasattr(self, "slider_label_updaters"):
             for updater in self.slider_label_updaters:
                 updater()
 
-        # --- Fix: resync processing queue depth map paths after refresh ---
+        # Resync processing queue
         if hasattr(self.previewer, "video_list") and hasattr(self, "resolution_output_list"):
             for i, video_entry in enumerate(self.previewer.video_list):
                 if i < len(self.resolution_output_list):
                     self.resolution_output_list[i].depth_map = video_entry.get("depth_map", None)
-        # 4. Refresh preview to show the new values
+
+        # Refresh preview
         self.on_slider_release(None)
 
     def _update_sidecar_button_text(self):

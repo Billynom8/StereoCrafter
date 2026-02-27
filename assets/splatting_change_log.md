@@ -2,6 +2,21 @@
 
 All notable changes to the splatting GUI and related components.
 
+## Version 26-02-27.6
+
+### Added
+
+- **Cross-Eye SBS Toggle**: Press **'X'** while the SBS Preview window is in focus to swap left/right views for cross-eye viewing.
+- **SBS State Persistence**: The SBS preview toggle state is now saved to the configuration and restored automatically upon application startup.
+- **Unified Keyboard Navigation**: Arrows and spacebar events are now relayed from the SBS window to the main GUI, allowing seamless playback control while inspecting the 3D view.
+- **Click-to-Focus Management**: Improved focus behavior—clicking the background or the preview canvas now successfully "defocuses" text input fields, restoring hotkey functionality immediately.
+
+### Refactored
+
+- **Core Sidecar Manager**: Centralized all sidecar reading, writing, and path resolution into `core/common/sidecar_manager.py`. This logic is now shared across both Splatting and Merging GUIs.
+- **Automated Parameter Syncing**: Replaced ~200 lines of manual mapping in the GUI with an automated sync system that maps JSON keys directly to Tkinter variables via a central schema.
+- **Geometric Isolation**: Moved the math for converting between UI Width/Bias and storage Left/Right border values into the core library, isolating the "math" from the "clicks."
+
 ## Version 26-02-27.4
 
 ### Added
