@@ -136,8 +136,8 @@ def execute_forward_warp(
     Returns:
         Tuple of (right_eye_tensor, occlusion_mask)
     """
-    from dependency.stereocrafter_util import log_debug_args
-    log_debug_args(locals(), "execute_forward_warp", "forward_warp")
+    # from dependency.stereocrafter_util import log_debug_args
+    # log_debug_args(locals(), "execute_forward_warp", "forward_warp")
 
     depth_tensor = torch.clip(depth_tensor, 0.0, 1.0)
 
@@ -153,12 +153,12 @@ def execute_forward_warp(
     with torch.no_grad():
         right_eye_raw, occlusion_mask = stereo_projector(source_tensor, disp_map)
         
-    from dependency.stereocrafter_util import dump_debug_tensor
-    dump_debug_tensor(source_tensor, "3_source_video_left", "forward_warp")
-    dump_debug_tensor(depth_tensor, "4_pre_warp_depth", "forward_warp")
-    dump_debug_tensor(disp_map, "5_disparity_map", "forward_warp")
-    dump_debug_tensor(right_eye_raw, "6_warped_right_eye", "forward_warp")
-    dump_debug_tensor(occlusion_mask, "7_occlusion_mask", "forward_warp")
+    # from dependency.stereocrafter_util import dump_debug_tensor
+    # dump_debug_tensor(source_tensor, "3_source_video_left", "forward_warp")
+    # dump_debug_tensor(depth_tensor, "4_pre_warp_depth", "forward_warp")
+    # dump_debug_tensor(disp_map, "5_disparity_map", "forward_warp")
+    # dump_debug_tensor(right_eye_raw, "6_warped_right_eye", "forward_warp")
+    # dump_debug_tensor(occlusion_mask, "7_occlusion_mask", "forward_warp")
         
     return right_eye_raw, occlusion_mask
 
