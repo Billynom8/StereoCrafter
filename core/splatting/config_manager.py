@@ -76,6 +76,7 @@ SPLATTER_DEFAULT_CONFIG = {
     "encoding_nvenc_aq_strength": 8,
     "dnxhr_fullres_split": False,
     "dnxhr_profile": "HQX",
+    "sbs_enabled": False,
 }
 
 
