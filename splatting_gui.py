@@ -86,7 +86,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-27.7"
+GUI_VERSION = "26-02-27.8"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -102,6 +102,7 @@ from core.splatting import (
     ProcessingTask,
     BatchSetupResult,
     AnalysisService,
+    ConvergenceCache,
 )
 from core.splatting.depth_processing import DEPTH_VIS_TV10_BLACK_NORM, DEPTH_VIS_TV10_WHITE_NORM, _infer_depth_bit_depth
 from core.splatting.config_manager import ConfigManager
@@ -196,28 +197,25 @@ class SplatterGUI(ThemedTk):
         self.sidecar_manager = SidecarConfigManager()
         self.convergence_estimator = ConvergenceEstimatorWrapper()
         self.border_scanner = BorderScanner(gui_context=self)
-        # Cache: estimated per-clip max Total(D+P) keyed by signature
-        self._dp_total_est_cache = {}
 
-        # Cache: measured (render-time) per-clip max Total(D+P) keyed by signature
-        self._dp_total_true_cache = {}
-        self._dp_total_true_active_sig = None
-        self._dp_total_true_active_val = None
+        # --- Centralised cache (replaces 7+ scattered dicts) ---
+        self.cache = ConvergenceCache()
+        # Backward-compatible aliases so existing code keeps working.
+        self._dp_total_est_cache = self.cache.dp_total_est
+        self._dp_total_true_cache = self.cache.dp_total_true
+        self._auto_conv_cache = self.cache.auto_conv
+        self._clip_norm_cache = self.cache.clip_norm
 
         # Cache: AUTO-PASS CSV rows (optional) keyed by depth_map basename
         self._auto_pass_csv_cache = None
         self._auto_pass_csv_path = None
 
-        # --- NEW CACHE AND STATE ---
-        self._auto_conv_cache = {"Average": None, "Peak": None}
-        self._auto_conv_cached_path = None
         self._diag_test_pending = None
         self._diag_last_task_name = None
         self._is_auto_conv_running = False
         self._preview_debounce_timer = None
         self.slider_label_updaters = []
         self.set_convergence_value_programmatically = None
-        self._clip_norm_cache: Dict[str, Tuple[float, float]] = {}
         self._gn_warning_shown: bool = False
 
         # --- SBS preview (separate window; preview-only) ---
@@ -505,8 +503,8 @@ class SplatterGUI(ThemedTk):
     def _on_clip_navigate_with_cache_clear(self):
         """Callback for clip navigation that clears auto-convergence cache and saves sidecar."""
         # Clear auto-convergence cache when switching clips
-        self._auto_conv_cache = {"Average": None, "Peak": None}
-        self._auto_conv_cached_path = None
+        self.cache.clear_auto_conv()
+        self._auto_conv_cache = self.cache.auto_conv  # keep alias in sync
 
         # Clear processing information display
         self.clear_processing_info()
@@ -580,8 +578,8 @@ class SplatterGUI(ThemedTk):
             stop_event=self.stop_event,
             chunk_size=chunk_size,
         )
-        # Cache the result on the GUI object so downstream code can read it.
-        self._clip_norm_cache[depth_map_path] = result
+        # Cache the result so downstream code can read it.
+        self.cache.store_clip_norm(depth_map_path, result[0], result[1])
         return result
 
     def _on_multi_map_toggle(self):
@@ -1168,7 +1166,7 @@ class SplatterGUI(ThemedTk):
             current_index = self.previewer.current_video_index
             if 0 <= current_index < len(self.previewer.video_list):
                 depth_map_path = self.previewer.video_list[current_index].get("depth_map")
-                self._auto_conv_cached_path = depth_map_path
+                self.cache.auto_conv_path = depth_map_path
 
             # 2. Determine which value to apply immediately (based on the current 'mode' selection)
             if mode == "Average":
@@ -3737,7 +3735,8 @@ class SplatterGUI(ThemedTk):
         global_min, global_max = 0.0, 1.0
 
         if enable_global_norm and depth_map_path:
-            if depth_map_path not in self._clip_norm_cache:
+            cached_norm = self.cache.get_clip_norm(depth_map_path)
+            if cached_norm is None:
                 # --- CACHE MISS: Run the slow scan synchronously ---
                 logger.info(
                     f"Preview GN: Cache miss for {os.path.basename(depth_map_path)}. Running clip-local scan..."
@@ -3745,7 +3744,7 @@ class SplatterGUI(ThemedTk):
                 global_min, global_max = self._compute_clip_global_depth_stats(depth_map_path)
             else:
                 # --- CACHE HIT: Use cached values ---
-                global_min, global_max = self._clip_norm_cache[depth_map_path]
+                global_min, global_max = cached_norm
                 logger.debug(
                     f"Preview GN: Cache hit for {os.path.basename(depth_map_path)}. Min/Max: {global_min:.3f}/{global_max:.3f}"
                 )
@@ -4388,18 +4387,16 @@ class SplatterGUI(ThemedTk):
         single_video_path = current_source_dict.get("source_video")
         single_depth_path = current_source_dict.get("depth_map")
 
-        # --- NEW: Check if calculation is already done for a different mode/path ---
-        is_path_mismatch = single_depth_path != self._auto_conv_cached_path
-        is_cache_complete = (self._auto_conv_cache["Average"] is not None) or (
-            self._auto_conv_cache["Peak"] is not None
-        )
+        # --- Check if calculation is already done for a different mode/path ---
+        is_path_mismatch = self.cache.is_auto_conv_stale(single_depth_path)
+        is_cache_complete = self.cache.has_auto_conv()
 
         # If running from the combo box (force_run=True) AND the cache is incomplete
         # BUT the path has changed, we must clear the cache and run.
         if force_run and is_path_mismatch and is_cache_complete:
             logger.info("New video detected. Clearing Auto-Converge cache.")
-            self._auto_conv_cache = {"Average": None, "Peak": None}
-            self._auto_conv_cached_path = None
+            self.cache.clear_auto_conv()
+            self._auto_conv_cache = self.cache.auto_conv  # keep alias in sync
 
         # Validate paths
         if (
@@ -4502,7 +4499,7 @@ class SplatterGUI(ThemedTk):
             total_frames_override=total_frames_override,
             depth_native_size=depth_native_size,
             sidecar_folder=sidecar_folder,
-            clip_norm_cache=getattr(self, "_clip_norm_cache", None),
+            clip_norm_cache=self.cache.clip_norm,
             depth_blur_left_mix=mix_f,
         )
 
@@ -4581,7 +4578,7 @@ class SplatterGUI(ThemedTk):
                                 logger.info(f"Estimate Max Total(D+P): {float(est):.2f}%")
                             except Exception:
                                 pass
-                            self._dp_total_est_cache[sig] = float(est)
+                            self.cache.store_dp_est(sig, float(est))
                             if getattr(self, "previewer", None) is not None and hasattr(
                                 self.previewer, "set_depth_pop_max_estimate"
                             ):
@@ -4635,8 +4632,7 @@ class SplatterGUI(ThemedTk):
             max_disp = float(self.max_disp_var.get())
             gamma = float(self.depth_gamma_var.get())
             sig = self._dp_total_signature(depth_path, conv, max_disp, gamma)
-            v = self._dp_total_est_cache.get(sig, None)
-            return float(v) if v is not None else None
+            return self.cache.get_dp_est(sig)
         except Exception:
             return None
 
@@ -4741,7 +4737,7 @@ class SplatterGUI(ThemedTk):
                     float(current_data.get("max_disparity", 0.0)),
                     float(current_data.get("gamma", 1.0)),
                 )
-                dp_true = self._dp_total_true_cache.get(sig, None)
+                dp_true = self.cache.get_dp_true(sig)
             except Exception:
                 dp_true = None
             if dp_true is None:
@@ -5346,8 +5342,8 @@ class SplatterGUI(ThemedTk):
             current_data.update(gui_save_data)
 
             # 4. Filter for export (preserve metric estimates)
-            if self._dp_total_max_seen is not None:
-                current_data["dp_total_max_est"] = round(float(self._dp_total_max_seen), 6)
+            if self.cache.dp_total_max_seen is not None:
+                current_data["dp_total_max_est"] = round(float(self.cache.dp_total_max_seen), 6)
 
         except Exception as e:
             logger.error(f"Error during sidecar save: {e}", exc_info=True)

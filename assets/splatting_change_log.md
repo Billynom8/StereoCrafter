@@ -2,6 +2,14 @@
 
 All notable changes to the splatting GUI and related components.
 
+## Version 26-02-27.8
+
+### Refactored (v26-02-27.8)
+
+- **ProcessingSettings.from_config()**: New classmethod on `ProcessingSettings` that builds an instance from a flat config dict with automatic type coercion and key aliasing. `_get_processing_settings` in the GUI reduced from 60 → 25 lines.
+- **Delegated Validation**: The 55-line inline validation block in `start_processing()` now delegates to `BatchProcessor.validate_settings()` (single source of truth).
+- **ConvergenceCache**: New `core/splatting/convergence_cache.py` module centralises all per-clip cache state (`_auto_conv_cache`, `_dp_total_est_cache`, `_dp_total_true_cache`, `_clip_norm_cache`) into a single `ConvergenceCache` object. The GUI uses backward-compatible aliases during the transition.
+
 ## Version 26-02-27.7
 
 ### Added (v26-02-27.7)
