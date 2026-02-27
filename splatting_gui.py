@@ -23,13 +23,13 @@ import time
 import logging
 import platform
 from typing import Optional, Tuple, Any, Dict
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 import math
 
 # --- Depth Map Visualization Levels ---
 # These affect ONLY depth-map visualization (Preview 'Depth Map' and Map Test images),
 # not the depth values used for splatting.
-DEPTH_VIS_APPLY_TV_RANGE_EXPANSION_10BIT = True
+DEPTH_VIS_APPLY_TV_RANGE_EXPANSION_10BIT = False
 DEPTH_VIS_TV10_BLACK_NORM = 64.0 / 1023.0
 DEPTH_VIS_TV10_WHITE_NORM = 940.0 / 1023.0
 
@@ -87,7 +87,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-26.2"
+GUI_VERSION = "26-02-27.4"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -198,6 +198,8 @@ class SplatterGUI(ThemedTk):
         # --- NEW CACHE AND STATE ---
         self._auto_conv_cache = {"Average": None, "Peak": None}
         self._auto_conv_cached_path = None
+        self._diag_test_pending = None
+        self._diag_last_task_name = None
         self._is_auto_conv_running = False
         self._preview_debounce_timer = None
         self.slider_label_updaters = []
@@ -265,6 +267,7 @@ class SplatterGUI(ThemedTk):
         self.dnxhr_profile_var = tk.StringVar(value="HQX")
         self.skip_lowres_preproc_var = tk.BooleanVar(value=False)
         self.track_dp_total_true_on_render_var = tk.BooleanVar(value=False)
+        self.strict_ffmpeg_decode_var = tk.BooleanVar(value=False)
         self.move_to_finished_var = tk.BooleanVar(value=True)
         self.crosshair_enabled_var = tk.BooleanVar(value=False)
         self.crosshair_white_var = tk.BooleanVar(value=False)
@@ -1120,6 +1123,10 @@ class SplatterGUI(ThemedTk):
                         self.processing_map_var.set(info_data["map"])
                     if "task_name" in info_data:
                         self.processing_task_name_var.set(info_data["task_name"])
+                        self._diag_last_task_name = info_data["task_name"]
+
+                elif isinstance(message, tuple) and len(message) > 0 and message[0] == "diagnostic_capture":
+                    self._handle_gui_diagnostic_capture(message[1])
 
         except queue.Empty:
             pass
@@ -1943,6 +1950,19 @@ class SplatterGUI(ThemedTk):
 
         # Track these for disabling during processing
         self.widgets_to_disable.extend([self.combo_color_tags_mode, self.combo_border_mode, self.btn_border_rescan])
+
+        # Row 3, Col 0: Strict FFmpeg decode toggle (affects how the source video is decoded for splatting/preview)
+        self.strict_decode_frame = ttk.Frame(self.output_settings_frame)
+        self.strict_decode_frame.grid(row=3, column=0, sticky="w", padx=5, pady=0)
+        self.chk_strict_ffmpeg_decode = ttk.Checkbutton(
+            self.strict_decode_frame,
+            text="ffmpeg decode",
+            variable=self.strict_ffmpeg_decode_var,
+            command=self._on_strict_ffmpeg_decode_toggle,
+        )
+        self.chk_strict_ffmpeg_decode.pack(side="left", padx=(0, 3))
+        self._create_hover_tooltip(self.chk_strict_ffmpeg_decode, "strict_ffmpeg_decode")
+        self.widgets_to_disable.append(self.chk_strict_ffmpeg_decode)
 
         current_row = 0  # Reset for next frame
         # ===================================================================
@@ -2838,6 +2858,17 @@ class SplatterGUI(ThemedTk):
                 getattr(self, "track_dp_total_true_on_render_var", None)
                 and self.track_dp_total_true_on_render_var.get()
             ),
+            strict_ffmpeg_decode=bool(config.get("strict_ffmpeg_decode", False)),
+            encoding_encoder=str(config.get("encoding_encoder", "Auto")),
+            encoding_quality=str(config.get("encoding_quality", "Auto")),
+            encoding_tune=str(config.get("encoding_tune", "Auto")),
+            encoding_nvenc_lookahead_enabled=bool(config.get("encoding_nvenc_lookahead_enabled", False)),
+            encoding_nvenc_lookahead=int(config.get("encoding_nvenc_lookahead", 16)),
+            encoding_nvenc_spatial_aq=bool(config.get("encoding_nvenc_spatial_aq", False)),
+            encoding_nvenc_temporal_aq=bool(config.get("encoding_nvenc_temporal_aq", False)),
+            encoding_nvenc_aq_strength=int(config.get("encoding_nvenc_aq_strength", 8)),
+            dnxhr_fullres_split=bool(config.get("dnxhr_fullres_split", False)),
+            dnxhr_profile=str(config.get("dnxhr_profile", "HQX")),
         )
 
     def get_current_preview_settings(self) -> dict:
@@ -3755,9 +3786,19 @@ class SplatterGUI(ThemedTk):
 
         # --- END NEW CACHE LOGIC ---
 
-        # Determine the correct scaling base (max RAW value) based on bit depth detected by previewer
+        # Determine the correct scaling base (max RAW value) using Render-parity logic
         # 1. Scaling Logic
-        depth_bits = getattr(self.previewer, "_depth_bit_depth", 8)
+        depth_bits = getattr(self.previewer, "_depth_bit_depth", 0)
+        
+        # If previewer hasn't tagged the bit depth, or it's default 8, double-check from file info
+        # to ensure parity with the renderer's ffprobe-based detection.
+        if (depth_bits <= 8) and depth_map_path:
+             if not hasattr(self, "_depth_bits_cache"): self._depth_bits_cache = {}
+             if depth_map_path not in self._depth_bits_cache:
+                 info = get_video_stream_info(depth_map_path)
+                 self._depth_bits_cache[depth_map_path] = _infer_depth_bit_depth(info)
+             depth_bits = max(depth_bits, self._depth_bits_cache[depth_map_path])
+
         max_val_in_frame = float(depth_numpy_raw.max())
         
         if depth_bits == 16:
@@ -3766,7 +3807,10 @@ class SplatterGUI(ThemedTk):
             max_raw_value = 4095.0
         elif depth_bits == 10:
             max_raw_value = 1023.0
+        elif depth_bits == 8:
+            max_raw_value = 255.0
         else:
+            # Fallback auto-detection for truly untagged sources (e.g. numpy arrays)
             if max_val_in_frame > 256.0: max_raw_value = 1023.0
             elif max_val_in_frame > 1.05: max_raw_value = 255.0
             else: max_raw_value = 1.0
@@ -4308,6 +4352,14 @@ class SplatterGUI(ThemedTk):
             generator.generate_custom_sidecars()
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _on_strict_ffmpeg_decode_toggle(self):
+        """When ffmpeg decode is toggled, reload the current preview item so readers re-open with the new decode path."""
+        try:
+            if hasattr(self, "previewer"):
+                self.previewer.update_preview()
+        except Exception as e:
+            logger.debug(f"Error updating preview on ffmpeg decode toggle: {e}")
 
     def run_preview_auto_converge(self, force_run=False):
         """
@@ -6097,6 +6149,51 @@ class SplatterGUI(ThemedTk):
         settings.single_finished_source_folder = single_finished_source_folder
         settings.single_finished_depth_folder = single_finished_depth_folder
 
+        # --- Diagnostic Map/Splat Test Mode (single-frame capture; no video encoding) ---
+        if self.map_test_var.get() or self.splat_test_var.get():
+            try:
+                test_type = "map" if self.map_test_var.get() else "splat"
+                ffmpeg_tag = "_ffmpeg" if bool(self.strict_ffmpeg_decode_var.get()) else ""
+
+                # Current frame index from preview scrubber (best-effort)
+                frame_idx = 0
+                try:
+                    if hasattr(self, "previewer") and self.previewer is not None and hasattr(self.previewer, "frame_scrubber_var"):
+                        frame_idx = int(float(self.previewer.frame_scrubber_var.get()))
+                except Exception:
+                    frame_idx = 0
+
+                # Capture the current preview image (after auto-switch) for parity comparison
+                preview_img = None
+                try:
+                    if hasattr(self, "previewer") and self.previewer is not None:
+                        _imgtk = getattr(self.previewer, "preview_image_tk", None)
+                        if _imgtk is not None:
+                            preview_img = ImageTk.getimage(_imgtk).convert("RGB")
+                            preview_img = preview_img.copy()
+                except Exception:
+                    preview_img = None
+
+                self._diag_test_pending = {
+                    "test_type": test_type,
+                    "video_base": os.path.splitext(os.path.basename(single_video_path))[0],
+                    "frame_idx": frame_idx,
+                    "ffmpeg_tag": ffmpeg_tag,
+                    "output_dir": getattr(settings, "output_splatted", "") or "",
+                    "preview_img": preview_img,
+                }
+
+                # Force RenderProcessor to emit a single-frame diagnostic capture instead of encoding a video.
+                settings.is_test_mode = True
+                settings.test_target_frame_idx = frame_idx
+
+            except Exception as e:
+                logger.error(f"Error initializing diagnostic test: {e}")
+                self._diag_test_pending = None
+        else:
+            self._diag_test_pending = None
+        # --- END DIAGNOSTIC ---
+
         # 4. Start the processing thread
         self.stop_event.clear()
         self.start_button.config(state="disabled")
@@ -6521,6 +6618,140 @@ class SplatterGUI(ThemedTk):
                 self._auto_pass_csv_update_row_from_current()
             except Exception:
                 pass
+
+    def _add_test_label(self, pil_img: Image.Image, label_text: str) -> Image.Image:
+        """Return a copy of pil_img with a red upper-left diagnostic label."""
+        if pil_img is None:
+            return pil_img
+        try:
+            out = pil_img.convert("RGB").copy()
+            draw = ImageDraw.Draw(out)
+            try:
+                font_size = max(12, min(28, int(out.size[1] * 0.035)))
+                font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+            except Exception:
+                try:
+                    font_size = max(12, min(28, int(out.size[1] * 0.035)))
+                    font = ImageFont.truetype("arial.ttf", font_size)
+                except Exception:
+                    font = ImageFont.load_default()
+
+            txt = str(label_text or "").strip()
+            if not txt:
+                return out
+
+            try:
+                bbox = draw.textbbox((0, 0), txt, font=font)
+                tw, th = (bbox[2] - bbox[0]), (bbox[3] - bbox[1])
+            except Exception:
+                tw, th = draw.textsize(txt, font=font)
+
+            pad_x = max(6, int(round(out.size[0] * 0.008)))
+            pad_y = max(4, int(round(out.size[1] * 0.008)))
+            x = pad_x
+            y = pad_y
+
+            # Thin black backing for readability without changing the image much.
+            rect = [x - 3, y - 2, x + tw + 3, y + th + 2]
+            draw.rectangle(rect, fill=(0, 0, 0))
+            draw.text((x, y), txt, fill=(255, 0, 0), font=font)
+            return out
+        except Exception:
+            return pil_img.copy() if hasattr(pil_img, "copy") else pil_img
+
+    def _handle_gui_diagnostic_capture(self, payload):
+        """Save Map Test / Splat Test outputs from a single-frame diagnostic render capture.
+
+        Triggered when settings.is_test_mode=True and RenderProcessor posts a
+        ("diagnostic_capture", grid_rgb_float01) message to the progress queue.
+        """
+        pending = getattr(self, "_diag_test_pending", None)
+        if not pending:
+            return
+
+        grid = payload.get("grid") if isinstance(payload, dict) else payload
+        if grid is None:
+            return
+
+        try:
+            output_dir = (
+                pending.get("output_dir")
+                or getattr(self, "output_splatted_var", tk.StringVar(value="")).get()
+                or os.getcwd()
+            )
+            os.makedirs(output_dir, exist_ok=True)
+
+            test_type = str(pending.get("test_type") or "test").lower()
+            video_base = str(pending.get("video_base") or "capture")
+            frame_idx = int(pending.get("frame_idx") or 0)
+            ffmpeg_tag = str(pending.get("ffmpeg_tag") or "")
+
+            task_name = ""
+            if isinstance(payload, dict):
+                task_name = str(payload.get("task_name") or "")
+            if not task_name:
+                task_name = str(getattr(self, "_diag_last_task_name", "") or "")
+            task_name = re.sub(r"[^A-Za-z0-9_-]+", "", task_name) if task_name else ""
+            if not task_name:
+                task_name = "Render"
+
+            task_name_lower = task_name.lower()
+            if task_name_lower in ("hires", "fullres", "full-resolution", "full"):
+                task_suffix = "Full"
+            elif task_name_lower in ("lowres", "low-resolution", "low"):
+                task_suffix = "Low"
+            else:
+                task_suffix = task_name
+
+            g = np.clip(grid, 0.0, 1.0)
+            g8 = (g * 255.0 + 0.5).astype(np.uint8)
+            pil_grid = Image.fromarray(g8, mode="RGB")
+
+            w, h = pil_grid.size
+            hw = w // 2
+            hh = h // 2
+
+            render_img = pil_grid
+            if hw > 0 and hh > 0 and (w >= 2 and h >= 2):
+                if test_type.startswith("map"):
+                    # RenderProcessor now forces 4-panel grid for tests; depth is top-right.
+                    render_img = pil_grid.crop((hw, 0, w, hh))
+                elif test_type.startswith("splat"):
+                    # RenderProcessor now forces 4-panel grid for tests; splat result is bottom-right.
+                    render_img = pil_grid.crop((hw, hh, w, h))
+
+            preview_img = pending.get("preview_img", None)
+
+            kind = "maptest" if test_type.startswith("map") else ("splattest" if test_type.startswith("splat") else "test")
+            stem = f"{video_base}_frame_{frame_idx:05d}_{kind}"
+
+            preview_labeled = (
+                self._add_test_label(preview_img, f"Preview-{task_suffix}") if preview_img is not None else None
+            )
+            render_labeled = self._add_test_label(render_img, f"Render-{task_suffix}")
+
+            preview_path = os.path.join(output_dir, f"{stem}_preview_{task_name}{ffmpeg_tag}.png")
+            render_path = os.path.join(output_dir, f"{stem}_render_{task_name}{ffmpeg_tag}.png")
+            sbs_path = os.path.join(output_dir, f"{stem}_SBS_{task_name}{ffmpeg_tag}.png")
+
+            if preview_labeled is not None:
+                preview_labeled.save(preview_path)
+
+            render_labeled.save(render_path)
+
+            if preview_labeled is not None:
+                if preview_labeled.size != render_labeled.size:
+                    render_for_sbs = render_labeled.resize(preview_labeled.size, Image.BILINEAR)
+                else:
+                    render_for_sbs = render_labeled
+                sbs = Image.new("RGB", (preview_labeled.size[0] * 2, preview_labeled.size[1]))
+                sbs.paste(preview_labeled, (0, 0))
+                sbs.paste(render_for_sbs, (preview_labeled.size[0], 0))
+                sbs.save(sbs_path)
+
+            logger.info(f"Test outputs saved to: {output_dir} ({kind}:{task_name}{ffmpeg_tag})")
+        except Exception as e:
+            logger.error(f"Diagnostic capture save failed: {e}", exc_info=True)
 
 
 # [REFACTORED] Depth processing functions imported from core module

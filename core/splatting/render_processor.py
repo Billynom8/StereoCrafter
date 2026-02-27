@@ -20,6 +20,7 @@ from decord import VideoReader
 
 from dependency.stereocrafter_util import (
     start_ffmpeg_pipe_process,
+    start_ffmpeg_pipe_process_dnxhr,
     release_cuda_memory,
     draw_progress_bar,
 )
@@ -78,6 +79,9 @@ class RenderProcessor:
         depth_blur_left_mix: float = 0.5,
         skip_lowres_preproc: bool = False,
         color_tags_mode: str = "Auto",
+        encoding_options: Optional[dict] = None,
+        dnxhr_fullres_split: bool = False,
+        dnxhr_profile: str = "HQX",
         is_test_mode: bool = False,
         test_target_frame_idx: Optional[int] = None,
     ) -> bool:
@@ -123,7 +127,8 @@ class RenderProcessor:
         stereo_projector = ForwardWarpStereo(occlu_map=True).cuda()
 
         height, width = target_output_height, target_output_width
-        os.makedirs(os.path.dirname(output_video_path_base), exist_ok=True)
+        if not is_test_mode:
+            os.makedirs(os.path.dirname(output_video_path_base), exist_ok=True)
 
         # Determine output grid dimensions and final path
         grid_height, grid_width = (height, width * 2) if dual_output else (height * 2, width * 2)
@@ -135,21 +140,75 @@ class RenderProcessor:
         self._log_color_metadata(video_stream_info, task_name)
 
         ffmpeg_process = None
+        mask_process = None
+        splat_process = None
+        use_dnxhr_split = (
+            bool(dnxhr_fullres_split) and bool(dual_output) and (not is_low_res_task) and (not is_test_mode)
+        )
+
         if not is_test_mode:
             encode_stream_info = self._get_encode_stream_info(video_stream_info, color_tags_mode)
-            ffmpeg_process = start_ffmpeg_pipe_process(
-                content_width=grid_width,
-                content_height=grid_height,
-                final_output_mp4_path=final_output_video_path,
-                fps=processed_fps,
-                video_stream_info=encode_stream_info,
-                user_output_crf=user_output_crf,
-                output_format_str="splatted_grid",
-                debug_label=task_name,
-            )
-            if ffmpeg_process is None:
-                logger.error("Failed to start FFmpeg pipe. Aborting splatting task.")
-                return False
+
+            if use_dnxhr_split:
+                base_dir = os.path.dirname(output_video_path_base)
+                stem = os.path.splitext(os.path.basename(output_video_path_base))[0]
+                prefix = f"{stem}{res_suffix}"
+
+                mask_dir = os.path.join(base_dir, "mask")
+                splat_dir = os.path.join(base_dir, "splat")
+                os.makedirs(mask_dir, exist_ok=True)
+                os.makedirs(splat_dir, exist_ok=True)
+
+                mask_output_path = os.path.join(mask_dir, f"{prefix}_mask.mp4")
+                splat_output_path = os.path.join(splat_dir, f"{prefix}_splat.mov")
+
+                mask_process = start_ffmpeg_pipe_process(
+                    content_width=width,
+                    content_height=height,
+                    final_output_mp4_path=mask_output_path,
+                    fps=processed_fps,
+                    video_stream_info=encode_stream_info,
+                    user_output_crf=user_output_crf,
+                    output_format_str="mask_only",
+                    debug_label=task_name,
+                    encoding_options=encoding_options,
+                )
+                if mask_process is None:
+                    logger.error("Failed to start FFmpeg pipe for mask output. Aborting splatting task.")
+                    return False
+
+                splat_process = start_ffmpeg_pipe_process_dnxhr(
+                    content_width=width,
+                    content_height=height,
+                    final_output_mov_path=splat_output_path,
+                    fps=processed_fps,
+                    dnxhr_profile=dnxhr_profile,
+                )
+                if splat_process is None:
+                    logger.error("Failed to start DNxHR pipe for splat output. Aborting splatting task.")
+                    try:
+                        mask_process.stdin.close()
+                        mask_process.wait(timeout=10)
+                    except Exception:
+                        pass
+                    return False
+
+                ffmpeg_process = mask_process
+            else:
+                ffmpeg_process = start_ffmpeg_pipe_process(
+                    content_width=grid_width,
+                    content_height=grid_height,
+                    final_output_mp4_path=final_output_video_path,
+                    fps=processed_fps,
+                    video_stream_info=encode_stream_info,
+                    user_output_crf=user_output_crf,
+                    output_format_str="splatted_grid",
+                    debug_label=task_name,
+                    encoding_options=encoding_options,
+                )
+                if ffmpeg_process is None:
+                    logger.error("Failed to start FFmpeg pipe. Aborting splatting task.")
+                    return False
             
             self._compare_encoding_flags(ffmpeg_process, task_name)
 
@@ -174,7 +233,7 @@ class RenderProcessor:
             )
 
             for i in frame_index_iter:
-                if self.stop_event.is_set() or (ffmpeg_process is not None and ffmpeg_process.poll() is not None):
+                if self.stop_event.is_set() or (ffmpeg_process is not None and ffmpeg_process.poll() is not None) or (use_dnxhr_split and splat_process is not None and splat_process.poll() is not None):
                     break
 
                 batch_indices = list(range(i, min(i + batch_size, total_frames_to_process)))
@@ -184,6 +243,24 @@ class RenderProcessor:
                 # 1. Fetch frames
                 batch_video_numpy = input_video_reader.get_batch(batch_indices).asnumpy()
                 batch_depth_numpy_raw = depth_map_reader.get_batch(batch_indices).asnumpy()
+
+                # --- NEW: Aspect Ratio Parity ---
+                # Immediate resize to ensure all following steps (normalization, dilation, blur)
+                # occur at the correct target aspect ratio, matching the GUI previewer.
+                video_h, video_w = batch_video_numpy.shape[1], batch_video_numpy.shape[2]
+                depth_h, depth_w = batch_depth_numpy_raw.shape[1], batch_depth_numpy_raw.shape[2]
+                
+                if depth_h != video_h or depth_w != video_w:
+                    logger.debug(f"Resizing depth from {depth_w}x{depth_h} to match video {video_w}x{video_h} for aspect-ratio parity.")
+                    interp = cv2.INTER_AREA if (video_w < depth_w and video_h < depth_h) else cv2.INTER_LINEAR
+                    resized_depth = np.empty((batch_depth_numpy_raw.shape[0], video_h, video_w), dtype=batch_depth_numpy_raw.dtype)
+                    for idx in range(batch_depth_numpy_raw.shape[0]):
+                        resized_depth[idx] = cv2.resize(
+                            batch_depth_numpy_raw[idx],
+                            (video_w, video_h),
+                            interpolation=interp
+                        )
+                    batch_depth_numpy_raw = resized_depth
 
                 # 2. Normalize and apply gamma (BEFORE dilation/blur)
                 batch_depth_normalized = normalize_and_gamma_depth(
@@ -241,9 +318,12 @@ class RenderProcessor:
 
                 # 5. Handle results (diag tests or FFmpeg write)
                 if is_test_mode and test_target_frame_idx is not None:
-                    self._handle_diagnostic_capture(batch_processed_frames, dual_output)
+                    self._handle_diagnostic_capture(batch_processed_frames, dual_output, task_name)
                 elif ffmpeg_process:
-                    self._write_to_ffmpeg(ffmpeg_process, batch_processed_frames, dual_output)
+                    if use_dnxhr_split and mask_process and splat_process:
+                        self._write_split_to_ffmpeg(mask_process, splat_process, batch_processed_frames)
+                    else:
+                        self._write_to_ffmpeg(ffmpeg_process, batch_processed_frames, dual_output)
 
                 frame_count += len(batch_indices)
                 self.progress_queue.put(("processed", frame_count))
@@ -264,6 +344,13 @@ class RenderProcessor:
                     ffmpeg_process.wait(timeout=30)
                 except Exception as e:
                     logger.warning(f"Error closing FFmpeg: {e}")
+            
+            if use_dnxhr_split and splat_process:
+                try:
+                    splat_process.stdin.close()
+                    splat_process.wait(timeout=30)
+                except Exception as e:
+                    logger.warning(f"Error closing DNxHR pipe: {e}")
             
             del stereo_projector
             release_cuda_memory()
@@ -379,23 +466,7 @@ class RenderProcessor:
             elif batch_depth_numpy_float.shape[-1] == 3:
                 batch_depth_numpy_float = batch_depth_numpy_float[..., 0]
         
-        depth_h, depth_w = batch_depth_numpy_float.shape[1], batch_depth_numpy_float.shape[2]
-        
-        # Resize depth if dimensions don't match
-        if depth_h != video_h or depth_w != video_w:
-            logger.debug(f"Resizing depth from {depth_w}x{depth_h} to match video {video_w}x{video_h}")
-
-            
-            interp = cv2.INTER_AREA if (video_w < depth_w and video_h < depth_h) else cv2.INTER_LINEAR
-            resized_depth = np.empty((batch_depth_numpy_float.shape[0], video_h, video_w), dtype=batch_depth_numpy_float.dtype)
-            
-            for idx in range(batch_depth_numpy_float.shape[0]):
-                resized_depth[idx] = cv2.resize(
-                    batch_depth_numpy_float[idx],
-                    (video_w, video_h),
-                    interpolation=interp
-                )
-            batch_depth_numpy_float = resized_depth
+        # Depth is already resized to video dimensions at the start of the render loop.
         
         # Move to GPU
         source_tensor = torch.from_numpy(batch_video_numpy).permute(0, 3, 1, 2).float().cuda() / 255.0
@@ -433,13 +504,14 @@ class RenderProcessor:
         return results
 
 
-    def _handle_diagnostic_capture(self, batch_results: List[dict], dual_output: bool):
+    def _handle_diagnostic_capture(self, batch_results: List[dict], dual_output: bool, task_name: str):
         # In test mode, we usually only have one frame
+        if not batch_results:
+            return
         res = batch_results[0]
-        # This is a bit tricky since we don't have direct access to GUI previewer here.
-        # We'll put it in the queue for the GUI to handle.
-        grid = self._construct_grid(res, dual_output)
-        self.progress_queue.put(("diagnostic_capture", grid))
+        # For diagnostic captures, we always use the 4-panel grid so the depth map is available
+        grid = self._construct_grid(res, dual_output=False)
+        self.progress_queue.put(("diagnostic_capture", {"grid": grid, "task_name": task_name}))
 
     def _write_to_ffmpeg(self, process: Any, batch_results: List[dict], dual_output: bool):
         for res in batch_results:
@@ -448,6 +520,24 @@ class RenderProcessor:
             grid_uint16 = (np.clip(grid, 0.0, 1.0) * 65535.0).astype(np.uint16)
             grid_bgr = cv2.cvtColor(grid_uint16, cv2.COLOR_RGB2BGR)
             process.stdin.write(grid_bgr.tobytes())
+
+    def _write_split_to_ffmpeg(self, mask_process: Any, splat_process: Any, batch_results: List[dict]):
+        """Write mask + splat as separate full-res files (used by DNxHR split mode)."""
+        for res in batch_results:
+            occlusion = res["occlusion"]
+            right = res["right"]
+
+            if occlusion.ndim == 2 or (occlusion.ndim == 3 and occlusion.shape[-1] == 1):
+                occlusion = np.stack([occlusion.squeeze()] * 3, axis=-1)
+
+            occl_u16 = (np.clip(occlusion, 0.0, 1.0) * 65535.0).astype(np.uint16)
+            right_u16 = (np.clip(right, 0.0, 1.0) * 65535.0).astype(np.uint16)
+
+            occl_bgr = cv2.cvtColor(occl_u16, cv2.COLOR_RGB2BGR)
+            right_bgr = cv2.cvtColor(right_u16, cv2.COLOR_RGB2BGR)
+
+            mask_process.stdin.write(occl_bgr.tobytes())
+            splat_process.stdin.write(right_bgr.tobytes())
 
     def _construct_grid(self, res: dict, dual_output: bool) -> np.ndarray:
         """Construct output grid for encoding.

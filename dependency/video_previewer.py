@@ -11,6 +11,12 @@ import subprocess
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 from decord import VideoReader, cpu
 
+# Optional strict FFmpeg decode reader (matches FFmpeg YUV->RGB conversion)
+try:
+    from core.common.video_io import FFmpegRGBSingleFrameReader
+except Exception:
+    FFmpegRGBSingleFrameReader = None
+
 # Import release_cuda_memory from the util module
 from .stereocrafter_util import (
     Tooltip,
@@ -646,35 +652,28 @@ class VideoPreviewer(ttk.Frame):
                 self.on_slider_release(None)
 
     def _handle_load_refresh(self):
-        """Internal handler for the 'Load/Refresh List' button.
-        Performs a full scan if the list hasn't been scanned yet, or if the current
-        selection appears invalid (e.g. files moved).
-        """
+        """Internal handler for the 'Load/Refresh List' button."""
         self._stop_playback()
 
-        # Determine if we should force a rescan.
-        # Logic: If we have no videos, or if the current one doesn't exist anymore (likely moved during batch).
-        force_rescan = not self.video_list
-        if not force_rescan and self.current_video_index >= 0:
-            current_paths = self.video_list[self.current_video_index]
-            main_path = current_paths.get("source_video")
-            if main_path and not os.path.exists(main_path):
-                logger.debug(f"Refresh: Current video missing ({main_path}), forcing rescan.")
-                force_rescan = True
-
-        if not self._video_list_scanned or force_rescan:
+        if not self._video_list_scanned:
+            # First press: do a full scan
             if self.find_sources_callback:
                 self.load_video_list(find_sources_callback=self.find_sources_callback)
                 self._video_list_scanned = True
             else:
                 logger.error(
-                    "VideoPreviewer: 'find_sources_callback' was not provided. Cannot load video list."
+                    "VideoPreviewer: 'find_sources_callback' was not provided during initialization. Cannot load video list."
+                )
+                messagebox.showerror(
+                    "Initialization Error",
+                    "The 'find_sources_callback' was not provided to the previewer.",
                 )
         else:
-            # Subsequent presses: just refresh the preview from the existing list (fast)
+            # Subsequent presses: just refresh the preview without rescanning
             if self.video_list and self.current_video_index >= 0:
                 self._load_preview_by_index(self.current_video_index)
             elif self.find_sources_callback:
+                # Fallback: if video_list is empty, do a full scan
                 self.load_video_list(find_sources_callback=self.find_sources_callback)
                 self._video_list_scanned = True
 
@@ -1117,7 +1116,43 @@ class VideoPreviewer(ttk.Frame):
                 # --- END MODIFIED ---
 
                 try:
-                    reader = VideoReader(path, ctx=cpu(0))
+                    # Use FFmpeg-based reader for the source video when Strict FFmpeg decode is enabled.
+                    use_strict = False
+                    try:
+                        if key == "source_video" and self.get_params_callback:
+                            params = self.get_params_callback() or {}
+                            use_strict = bool(params.get("strict_ffmpeg_decode", False))
+                    except Exception:
+                        use_strict = False
+
+                    if use_strict and FFmpegRGBSingleFrameReader is not None:
+                        # Match render-time strict decode defaults (BT.709 Limited unless stream tags indicate otherwise)
+                        in_range = "tv"
+                        in_matrix = "bt709"
+                        try:
+                            sinfo = get_video_stream_info(path) or {}
+                            cr = str(sinfo.get("color_range") or sinfo.get("range") or "").lower()
+                            if cr in ("pc", "full", "jpeg"):
+                                in_range = "pc"
+                            cm = str(sinfo.get("color_space") or sinfo.get("matrix") or sinfo.get("matrix_coefficients") or "").lower()
+                            if cm and cm not in ("none", "unknown"):
+                                in_matrix = cm
+                        except Exception:
+                            pass
+
+                        # Use a Decord reader once to get fps/frames (fast) then decode the selected frame via FFmpeg
+                        info_reader = VideoReader(path, ctx=cpu(0))
+                        reader = FFmpegRGBSingleFrameReader(
+                            path,
+                            width=int(info_reader[0].shape[1]),
+                            height=int(info_reader[0].shape[0]),
+                            fps=float(info_reader.get_avg_fps()),
+                            total_frames=len(info_reader),
+                            in_range=in_range,
+                            in_matrix=in_matrix,
+                        )
+                    else:
+                        reader = VideoReader(path, ctx=cpu(0))
                     if num_frames == -1:
                         num_frames = len(reader)
                     elif num_frames != len(reader):
@@ -1524,8 +1559,9 @@ class VideoPreviewer(ttk.Frame):
                         else:
                             frame_np = reader.get_batch([frame_idx]).asnumpy()
                         # IMPORTANT: keep depth as RAW values (8-bit stays 0..255, 10-bit stays 0..1023+)
-                        # Keep original dtype to match Render engine (uint16/uint8)
-                        frame_tensor = torch.from_numpy(frame_np).permute(0, 3, 1, 2)
+                        frame_tensor = (
+                            torch.from_numpy(frame_np).permute(0, 3, 1, 2).float()
+                        )
                     else:
                         frame_np = reader.get_batch([frame_idx]).asnumpy()
                         frame_tensor = (

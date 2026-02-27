@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Constants for TV-range depth map normalization
 DEPTH_VIS_TV10_BLACK_NORM = 64.0 / 1023.0
 DEPTH_VIS_TV10_WHITE_NORM = 940.0 / 1023.0
-DEPTH_VIS_APPLY_TV_RANGE_EXPANSION_10BIT = True
+DEPTH_VIS_APPLY_TV_RANGE_EXPANSION_10BIT = False
 
 
 def custom_dilate(
