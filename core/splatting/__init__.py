@@ -40,3 +40,4 @@ from .fusion_export import FusionSidecarGenerator
 
 from .preview_rendering import PreviewRenderer
 
+from .analysis_service import AnalysisService

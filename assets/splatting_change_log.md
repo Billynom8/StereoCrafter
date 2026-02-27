@@ -2,9 +2,9 @@
 
 All notable changes to the splatting GUI and related components.
 
-## Version 26-02-27.6
+## Version 26-02-27.7
 
-### Added
+### Added (v26-02-27.7)
 
 - **Cross-Eye SBS Toggle**: Press **'X'** while the SBS Preview window is in focus to swap left/right views for cross-eye viewing.
 - **SBS State Persistence**: The SBS preview toggle state is now saved to the configuration and restored automatically upon application startup.
@@ -17,9 +17,11 @@ All notable changes to the splatting GUI and related components.
 - **Automated Parameter Syncing**: Replaced ~200 lines of manual mapping in the GUI with an automated sync system that maps JSON keys directly to Tkinter variables via a central schema.
 - **Geometric Isolation**: Moved the math for converting between UI Width/Bias and storage Left/Right border values into the core library, isolating the "math" from the "clicks."
 
+- **AnalysisService**: Pure analysis pipelines migrated to `core/splatting/analysis_service.py` (`_auto_converge_worker`, `_estimate_dp_total_max_for_depth_video`, etc.)
+
 ## Version 26-02-27.4
 
-### Added
+### Added (v26-02-27.4)
 
 - **10-bit & Color Tagging**: Added support for 10-bit HEVC (libx265/hevc_nvenc) and DNxHR HQX encoding with accurate color space metadata (BT.2020 PQ/HLG).
 - **DNxHR Split Mode**: New output mode for high-resolution dual-stream delivery ([Occlusion Mask] and [Right Eye] as separate files).

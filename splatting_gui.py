@@ -86,7 +86,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-27.6"
+GUI_VERSION = "26-02-27.7"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -101,6 +101,7 @@ from core.splatting import (
     ProcessingSettings,
     ProcessingTask,
     BatchSetupResult,
+    AnalysisService,
 )
 from core.splatting.depth_processing import DEPTH_VIS_TV10_BLACK_NORM, DEPTH_VIS_TV10_WHITE_NORM, _infer_depth_bit_depth
 from core.splatting.config_manager import ConfigManager
@@ -569,59 +570,19 @@ class SplatterGUI(ThemedTk):
 
     def _compute_clip_global_depth_stats(self, depth_map_path: str, chunk_size: int = 100) -> Tuple[float, float]:
         """
-        [NEW HELPER] Computes the global min and max depth values from a depth video
-        by reading it in chunks. Used only for the preview's GN cache.
+        Computes the global min and max depth values from a depth video by reading
+        it in chunks. Used only for the preview's GN cache.
+
+        Delegates to AnalysisService.compute_clip_global_depth_stats (no GUI deps).
         """
-        logger.info(f"==> Starting clip-local depth stats pre-pass for {os.path.basename(depth_map_path)}...")
-        global_min, global_max = np.inf, -np.inf
-
-        try:
-            temp_reader = VideoReader(depth_map_path, ctx=cpu(0))
-            total_frames = len(temp_reader)
-
-            if total_frames == 0:
-                logger.error("Depth reader found 0 frames for global stats.")
-                return 0.0, 1.0  # Fallback
-
-            for i in range(0, total_frames, chunk_size):
-                if self.stop_event.is_set():
-                    logger.warning("Global stats scan stopped by user.")
-                    return 0.0, 1.0
-
-                current_indices = list(range(i, min(i + chunk_size, total_frames)))
-                chunk_numpy_raw = temp_reader.get_batch(current_indices).asnumpy()
-
-                # Handle RGB vs Grayscale depth maps
-                if chunk_numpy_raw.ndim == 4:
-                    if chunk_numpy_raw.shape[-1] == 3:  # RGB
-                        chunk_numpy = chunk_numpy_raw.mean(axis=-1)
-                    else:  # Grayscale with channel dim
-                        chunk_numpy = chunk_numpy_raw.squeeze(-1)
-                else:
-                    chunk_numpy = chunk_numpy_raw
-
-                chunk_min = chunk_numpy.min()
-                chunk_max = chunk_numpy.max()
-
-                if chunk_min < global_min:
-                    global_min = chunk_min
-                if chunk_max > global_max:
-                    global_max = chunk_max
-
-                # Skip progress bar for speed, use console log if needed
-
-            logger.info(f"==> Clip-local depth stats computed: min_raw={global_min:.3f}, max_raw={global_max:.3f}")
-
-            # Cache the result before returning
-            self._clip_norm_cache[depth_map_path] = (float(global_min), float(global_max))
-
-            return float(global_min), float(global_max)
-
-        except Exception as e:
-            logger.error(f"Error during clip-local depth stats scan for preview: {e}")
-            return 0.0, 1.0  # Fallback
-        finally:
-            gc.collect()
+        result = AnalysisService.compute_clip_global_depth_stats(
+            depth_map_path=depth_map_path,
+            stop_event=self.stop_event,
+            chunk_size=chunk_size,
+        )
+        # Cache the result on the GUI object so downstream code can read it.
+        self._clip_norm_cache[depth_map_path] = result
+        return result
 
     def _on_multi_map_toggle(self):
         """Called when Multi-Map checkbox is toggled."""
@@ -4520,28 +4481,10 @@ class SplatterGUI(ThemedTk):
     def _dp_total_signature(self, depth_path: str, conv: float, max_disp: float, gamma: float) -> str:
         """Signature for caching Total(D+P) metrics.
 
-        IMPORTANT: Convergence changes should NOT invalidate the cached display/estimate.
-        Also tolerate older call sites that might accidentally swap (conv, max_disp).
+        Delegates to AnalysisService.make_dp_cache_key.  Convergence is
+        intentionally excluded so slider moves don't bust the cache.
         """
-        try:
-            a = float(conv)
-            b = float(max_disp)
-
-            # If args look swapped (conv should be ~0..1, max_disp usually > 1), swap them.
-            if 0.0 <= a <= 1.0 and b > 1.0:
-                conv_val = a
-                max_disp_val = b
-            elif 0.0 <= b <= 1.0 and a > 1.0:
-                conv_val = b
-                max_disp_val = a
-            else:
-                conv_val = a
-                max_disp_val = b
-
-            # NOTE: conv_val intentionally excluded to prevent cache resets when convergence changes.
-            return f"{depth_path}|{float(max_disp_val):.4f}|{float(gamma):.4f}"
-        except Exception:
-            return str(depth_path)
+        return AnalysisService.make_dp_cache_key(depth_path, max_disp, gamma)
 
     def _estimate_dp_total_max_for_depth_video(
         self,
@@ -4558,270 +4501,46 @@ class SplatterGUI(ThemedTk):
         """
         Estimates the maximum Total(D+P) for a clip by sampling frames.
 
-        IMPORTANT: This aims to match the preview/render math as closely as possible:
-          - Reads depth in RAW code values (10-bit stays 0..1023-ish, not RGB-expanded)
-          - Runs the same depth pre-processing (dilate/blur) used by preview/render
-          - Applies the same normalization policy and gamma curve:
-                depth = clip(depth, 0..1)
-                depth = 1 - (1 - depth) ** gamma
+        Delegates to AnalysisService.estimate_dp_total_max — all math lives
+        there, zero Tkinter dependency.  This wrapper resolves the GUI-specific
+        context (previewer size, sidecar folder, norm cache) and passes it in.
         """
-        if not depth_path or not os.path.exists(depth_path):
-            return None
-
-        # Grab the same pre-proc knobs the preview pipeline uses (fallback to GUI vars if not provided).
-        p = params or {}
-
-        def _pfloat(key: str, default: float) -> float:
-            try:
-                v = p.get(key, default)
-                return float(v)
-            except Exception:
-                return float(default)
-
-        # NOTE: sidecars store these keys (depth_*) via _save_current_sidecar_data.
-        depth_dilate_size_x = _pfloat("depth_dilate_size_x", self._safe_float(self.depth_dilate_size_x_var))
-        depth_dilate_size_y = _pfloat("depth_dilate_size_y", self._safe_float(self.depth_dilate_size_y_var))
-        depth_blur_size_x = _pfloat("depth_blur_size_x", self._safe_float(self.depth_blur_size_x_var))
-        depth_blur_size_y = _pfloat("depth_blur_size_y", self._safe_float(self.depth_blur_size_y_var))
-        depth_dilate_left = _pfloat("depth_dilate_left", self._safe_float(self.depth_dilate_left_var))
-        depth_blur_left = _pfloat("depth_blur_left", self._safe_float(self.depth_blur_left_var))
-
-        # Gamma used for the estimator math (prefer explicit param dict if present).
-        try:
-            depth_gamma = float(p.get("depth_gamma", depth_gamma))
-        except Exception:
-            depth_gamma = float(depth_gamma)
-
-        # Build sample indices (evenly spaced, clamped)
-        total_frames = 0
-        try:
-            if total_frames_override is not None:
-                total_frames = int(total_frames_override)
-        except Exception:
-            total_frames = 0
-
-        if total_frames <= 0:
-            try:
-                tmp = VideoReader(depth_path, ctx=cpu(0))
-                total_frames = len(tmp)
-                del tmp
-            except Exception:
-                total_frames = 0
-
-        if total_frames <= 0:
-            return None
-
-        sample_frames = int(max(1, sample_frames))
-        if sample_frames >= total_frames:
-            indices = list(range(total_frames))
-        else:
-            indices = [int(round(i * (total_frames - 1) / (sample_frames - 1))) for i in range(sample_frames)]
-        # Ensure strictly increasing (helps the sequential reader)
-        indices = sorted(set(max(0, min(total_frames - 1, i)) for i in indices))
-
-        # Try to preserve RAW depth values (10-bit+) by using the same ffmpeg-backed reader used by render.
-        depth_stream_info = None
-        bit_depth = 8
-        pix_fmt = ""
-        try:
-            depth_stream_info = get_video_stream_info(depth_path)
-            bit_depth = _infer_depth_bit_depth(depth_stream_info)
-            pix_fmt = str((depth_stream_info or {}).get("pix_fmt", ""))
-        except Exception:
-            depth_stream_info = None
-            bit_depth = 8
-            pix_fmt = ""
-
-        # Determine an output size for sampling. If the previewer is active, match its current depth native size.
-        out_w = None
-        out_h = None
+        # -- Resolve GUI-specific context ----------------------------------
+        depth_native_size = None
         try:
             if self.previewer is not None and getattr(self.previewer, "_depth_path", None) == depth_path:
                 out_w = int(getattr(self.previewer, "_depth_native_w", 0) or 0)
                 out_h = int(getattr(self.previewer, "_depth_native_h", 0) or 0)
+                if out_w and out_h:
+                    depth_native_size = (out_w, out_h)
         except Exception:
-            out_w, out_h = None, None
+            depth_native_size = None
 
-        # Fallback: take from ffprobe stream info
-        if not out_w or not out_h:
-            try:
-                out_w = int((depth_stream_info or {}).get("width", 0) or 0)
-                out_h = int((depth_stream_info or {}).get("height", 0) or 0)
-            except Exception:
-                out_w, out_h = 0, 0
-
-        if not out_w or not out_h:
-            return None
-
-        # We only need sampled frames; no need to match clip resolution here (keeps it fast).
-        # This still matches parity better than RGB-expanded reads.
-        try:
-            depth_reader, _, _, _, _ = load_pre_rendered_depth(
-                depth_map_path=depth_path,
-                process_length=-1,
-                target_height=out_h,
-                target_width=out_w,
-                match_resolution_to_target=False,
-            )
-        except Exception:
-            # Fallback to Decord if the ffmpeg-backed reader cannot be created.
-            try:
-                depth_reader = VideoReader(depth_path, ctx=cpu(0))
-            except Exception:
-                return None
-
-        max_total = None
-
-        # Optional: adopt the same "sidecar forces GN off" behavior used in preview.
-        enable_global_norm = bool(p.get("enable_global_norm", False))
+        sidecar_folder = None
         try:
             sidecar_folder = self._get_sidecar_base_folder()
-            depth_map_basename = os.path.splitext(os.path.basename(depth_path))[0]
-            sidecar_ext = self.APP_CONFIG_DEFAULTS.get("SIDECAR_EXT", ".fssidecar")
-            json_sidecar_path = os.path.join(sidecar_folder, f"{depth_map_basename}{sidecar_ext}")
-            if os.path.exists(json_sidecar_path):
-                enable_global_norm = False
         except Exception:
             pass
-
-        # Fetch cached global min/max if GN is enabled (rare for estimator because sidecar usually exists).
-        global_min, global_max = 0.0, 1.0
-        if enable_global_norm:
-            try:
-                c = self._clip_norm_cache.get(depth_path)
-                if c:
-                    global_min = float(c.get("min", 0.0))
-                    global_max = float(c.get("max", 1.0))
-            except Exception:
-                global_min, global_max = 0.0, 1.0
-
-        for idx in indices:
-            try:
-                # Read raw frame as (1,H,W,1)
-                if hasattr(depth_reader, "seek"):
-                    depth_reader.seek(int(idx))
-                frame_np = depth_reader.get_batch([int(idx)]).asnumpy()
-
-                # Ensure numeric + channel-last gray
-                if frame_np.ndim == 3:
-                    # (1,H,W) -> (1,H,W,1)
-                    frame_np = frame_np[..., None]
-                elif frame_np.ndim == 4 and frame_np.shape[-1] >= 1:
-                    # If somehow RGB, take the first channel (depth stored as gray replicated)
-                    if frame_np.shape[-1] != 1:
-                        frame_np = frame_np[..., :1]
-                else:
-                    continue
-
-                frame_raw = frame_np.astype(np.float32, copy=False)
-
-                # Mirror preview: determine per-frame max content value (used in processing + normalization)
-                max_raw_content_value = float(np.max(frame_raw))
-                if max_raw_content_value < 1.0:
-                    max_raw_content_value = 1.0
-
-                # Pre-process (dilate/blur, left-edge ops) exactly like preview
-                try:
-                    processed = self._process_depth_batch(
-                        batch_depth_numpy_raw=frame_raw,
-                        depth_stream_info=depth_stream_info,
-                        depth_gamma=depth_gamma,
-                        depth_dilate_size_x=depth_dilate_size_x,
-                        depth_dilate_size_y=depth_dilate_size_y,
-                        depth_blur_size_x=depth_blur_size_x,
-                        depth_blur_size_y=depth_blur_size_y,
-                        is_low_res_task=False,
-                        max_raw_value=max_raw_content_value,
-                        global_depth_min=global_min,
-                        global_depth_max=global_max,
-                        depth_dilate_left=depth_dilate_left,
-                        depth_blur_left=depth_blur_left,
-                        debug_batch_index=0,
-                        debug_frame_index=int(idx),
-                        debug_task_name="EstimateMaxTotal",
-                    )
-                except Exception:
-                    processed = frame_raw  # fallback
-
-                # _process_depth_batch already returns normalized + gamma-applied depth in 0..1 (preview/render parity).
-                # Only fall back to manual scaling+gamma if the processor failed and returned raw code values.
-                try:
-                    if hasattr(processed, "ndim") and processed.ndim == 4:
-                        depth_norm = processed[0, ..., 0]
-                    elif hasattr(processed, "ndim") and processed.ndim == 3:
-                        depth_norm = processed[0, ...]
-                    else:
-                        depth_norm = processed
-                except Exception:
-                    depth_norm = processed[0, ..., 0]
-
-                try:
-                    maxv = float(np.max(depth_norm))
-                except Exception:
-                    maxv = 1.0
-
-                # If we're still in raw code space (e.g., 10-bit TV-range values ~64..940), scale using fixed ranges (NOT observed max).
-                if maxv > 1.5:
-                    if maxv <= 256.0:
-                        depth_norm = depth_norm / 255.0
-                    elif maxv <= 1024.0:
-                        depth_norm = depth_norm / 1023.0
-                    elif maxv <= 4096.0:
-                        depth_norm = depth_norm / 4095.0
-                    elif maxv <= 65536.0:
-                        depth_norm = depth_norm / 65535.0
-                    else:
-                        depth_norm = depth_norm / float(maxv)
-                    depth_norm = np.clip(depth_norm, 0.0, 1.0)
-                    if depth_gamma and abs(depth_gamma - 1.0) > 1e-6:
-                        inv = 1.0 - depth_norm
-                        inv = np.clip(inv, 0.0, 1.0)
-                        depth_norm = 1.0 - np.power(inv, float(depth_gamma))
-
-                depth_norm = np.clip(depth_norm, 0.0, 1.0)
-
-                # Compute Total(D+P) for this frame (match preview: stride sample + ignore holes)
-                ds = depth_norm[:: max(1, int(pixel_stride)), :: max(1, int(pixel_stride))].astype(
-                    np.float32, copy=False
-                )
-                valid = (ds > 0.001) & (ds < 0.999)
-                if not np.any(valid):
-                    continue
-                dmin = float(np.min(ds[valid]))
-                dmax = float(np.max(ds[valid]))
-
-                tv_disp_comp = 1.0
-                if not enable_global_norm:
-                    try:
-                        if (
-                            _infer_depth_bit_depth(depth_stream_info) > 8
-                            and str((depth_stream_info or {}).get("color_range", "unknown")).lower() == "tv"
-                        ):
-                            tv_disp_comp = 1.0 / (DEPTH_VIS_TV10_WHITE_NORM - DEPTH_VIS_TV10_BLACK_NORM)
-                    except Exception:
-                        tv_disp_comp = 1.0
-
-                scale = 2.0 * (float(max_disp) / 20.0) * tv_disp_comp
-                min_pct = (dmin - float(convergence_point)) * scale
-                max_pct = (dmax - float(convergence_point)) * scale
-
-                depth_pct = abs(min_pct) if min_pct < 0 else 0.0
-                pop_pct = max_pct if max_pct > 0 else 0.0
-                total = float(depth_pct + pop_pct)
-
-                if max_total is None or total > max_total:
-                    max_total = total
-
-            except Exception:
-                continue
 
         try:
-            if hasattr(depth_reader, "close"):
-                depth_reader.close()
+            mix_f = float(self.depth_blur_left_mix_var.get())
         except Exception:
-            pass
+            mix_f = 0.5
 
-        return max_total
+        return AnalysisService.estimate_dp_total_max(
+            depth_path=depth_path,
+            convergence_point=convergence_point,
+            max_disp=max_disp,
+            depth_gamma=depth_gamma,
+            params=params,
+            sample_frames=sample_frames,
+            pixel_stride=pixel_stride,
+            total_frames_override=total_frames_override,
+            depth_native_size=depth_native_size,
+            sidecar_folder=sidecar_folder,
+            clip_norm_cache=getattr(self, "_clip_norm_cache", None),
+            depth_blur_left_mix=mix_f,
+        )
 
     def run_estimate_dp_total_max(self):
         """Compute a quick sampled estimate of this clip's Max Total(D+P) and seed the overlay."""

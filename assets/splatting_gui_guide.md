@@ -84,7 +84,6 @@ Settings here apply to both Full and Low-resolution outputs.
 
 > [!TIP]
 > **Shared Navigation:** Keyboard hotkeys work even when the SBS window is in focus. You can navigate the video without switching back to the main GUI.
-
 > [!NOTE]
 > **Focus Management:** If the cursor is blinking in an input field (like "Jump to:"), hotkeys are disabled to allow typing. Click anywhere on the preview canvas or the GUI background to "release" the focus and re-enable hotkeys.
 
