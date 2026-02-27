@@ -2817,40 +2817,15 @@ class SplatterGUI(ThemedTk):
     def _get_processing_settings(self):
         """Converts current GUI configuration to BatchProcessor settings object."""
         config = self._get_current_config()
-        return ProcessingSettings(
-            input_source_clips=config["input_source_clips"],
-            input_depth_maps=config["input_depth_maps"],
-            output_splatted=config["output_splatted"],
-            max_disp=float(config["max_disp"]),
-            process_length=int(config["process_length"]),
-            enable_full_resolution=config["enable_full_resolution"],
-            full_res_batch_size=int(config["batch_size"]),
-            enable_low_resolution=config["enable_low_resolution"],
-            low_res_width=int(config["pre_res_width"]),
-            low_res_height=int(config["pre_res_height"]),
-            low_res_batch_size=int(config["low_res_batch_size"]),
-            dual_output=config["dual_output"],
-            zero_disparity_anchor=float(config["convergence_point"]),
-            enable_global_norm=config["enable_global_norm"],
-            move_to_finished=config["move_to_finished"],
-            output_crf_full=int(config["output_crf_full"]),
-            output_crf_low=int(config["output_crf_low"]),
-            depth_gamma=float(config["depth_gamma"]),
-            depth_dilate_size_x=float(config["depth_dilate_size_x"]),
-            depth_dilate_size_y=float(config["depth_dilate_size_y"]),
-            depth_blur_size_x=float(config["depth_blur_size_x"]),
-            depth_blur_size_y=float(config["depth_blur_size_y"]),
-            depth_dilate_left=float(config["depth_dilate_left"]),
-            depth_blur_left=float(config["depth_blur_left"]),
-            depth_blur_left_mix=float(config["depth_blur_left_mix"]),
-            auto_convergence_mode=config["auto_convergence_mode"],
+        return ProcessingSettings.from_config(
+            config,
+            # GUI-only overrides not stored in the config dict
             enable_sidecar_gamma=self.enable_sidecar_gamma_var.get(),
             enable_sidecar_blur_dilate=self.enable_sidecar_blur_dilate_var.get(),
-            # NEW fields
             multi_map=self.multi_map_var.get(),
             selected_depth_map=self.selected_depth_map_var.get().strip(),
             color_tags_mode=self.color_tags_mode_var.get() if hasattr(self, "color_tags_mode_var") else "Auto",
-            is_test_mode=False,  # Standard batch mode
+            is_test_mode=False,
             test_target_frame_idx=None,
             skip_lowres_preproc=bool(
                 getattr(self, "skip_lowres_preproc_var", None) and self.skip_lowres_preproc_var.get()
@@ -2861,17 +2836,6 @@ class SplatterGUI(ThemedTk):
                 getattr(self, "track_dp_total_true_on_render_var", None)
                 and self.track_dp_total_true_on_render_var.get()
             ),
-            strict_ffmpeg_decode=bool(config.get("strict_ffmpeg_decode", False)),
-            encoding_encoder=str(config.get("encoding_encoder", "Auto")),
-            encoding_quality=str(config.get("encoding_quality", "Auto")),
-            encoding_tune=str(config.get("encoding_tune", "Auto")),
-            encoding_nvenc_lookahead_enabled=bool(config.get("encoding_nvenc_lookahead_enabled", False)),
-            encoding_nvenc_lookahead=int(config.get("encoding_nvenc_lookahead", 16)),
-            encoding_nvenc_spatial_aq=bool(config.get("encoding_nvenc_spatial_aq", False)),
-            encoding_nvenc_temporal_aq=bool(config.get("encoding_nvenc_temporal_aq", False)),
-            encoding_nvenc_aq_strength=int(config.get("encoding_nvenc_aq_strength", 8)),
-            dnxhr_fullres_split=bool(config.get("dnxhr_fullres_split", False)),
-            dnxhr_profile=str(config.get("dnxhr_profile", "HQX")),
         )
 
     def get_current_preview_settings(self) -> dict:
@@ -5694,69 +5658,21 @@ class SplatterGUI(ThemedTk):
             self.previewer.set_ui_processing_state(True)
             self.previewer.cleanup()  # Release any loaded preview videos
 
-        # Input validation for all fields
+        # Build settings first, then validate via the core module (single source of truth).
         try:
-            max_disp_val = float(self.max_disp_var.get())
-            if max_disp_val <= 0:
-                raise ValueError("Max Disparity must be positive.")
-
-            anchor_val = float(self.zero_disparity_anchor_var.get())
-            if not (0.0 <= anchor_val <= 1.0):
-                raise ValueError("Zero Disparity Anchor must be between 0.0 and 1.0.")
-
-            if self.enable_full_res_var.get():
-                full_res_batch_size_val = int(self.batch_size_var.get())
-                if full_res_batch_size_val <= 0:
-                    raise ValueError("Full Resolution Batch Size must be positive.")
-
-            if self.enable_low_res_var.get():
-                pre_res_w = int(self.pre_res_width_var.get())
-                pre_res_h = int(self.pre_res_height_var.get())
-                if pre_res_w <= 0 or pre_res_h <= 0:
-                    raise ValueError("Low-Resolution Width and Height must be positive.")
-                low_res_batch_size_val = int(self.low_res_batch_size_var.get())
-                if low_res_batch_size_val <= 0:
-                    raise ValueError("Low-Resolution Batch Size must be positive.")
-
-            if not (self.enable_full_res_var.get() or self.enable_low_res_var.get()):
-                raise ValueError("At least one resolution (Full or Low) must be enabled to start processing.")
-
-            # --- NEW: Depth Pre-processing Validation ---
-            depth_gamma_val = float(self.depth_gamma_var.get())
-            if depth_gamma_val <= 0:
-                raise ValueError("Depth Gamma must be positive.")
-
-            # Validate Dilate X/Y
-            depth_dilate_size_x_val = float(self.depth_dilate_size_x_var.get())
-            depth_dilate_size_y_val = float(self.depth_dilate_size_y_var.get())
-            if (
-                depth_dilate_size_x_val < -10.0
-                or depth_dilate_size_x_val > 30.0
-                or depth_dilate_size_y_val < -10.0
-                or depth_dilate_size_y_val > 30.0
-            ):
-                raise ValueError("Depth Dilate Sizes (X/Y) must be between -10 and 30.")
-
-            # Validate Blur X/Y
-            depth_blur_size_x_val = int(float(self.depth_blur_size_x_var.get()))
-            depth_blur_size_y_val = int(float(self.depth_blur_size_y_var.get()))
-            if depth_blur_size_x_val < 0 or depth_blur_size_y_val < 0:
-                raise ValueError("Depth Blur Sizes (X/Y) must be non-negative.")
-            # Validate Dilate/Blur Left
-            depth_dilate_left_val = float(self.depth_dilate_left_var.get())
-            depth_blur_left_val = int(float(self.depth_blur_left_var.get()))
-            if depth_dilate_left_val < 0.0 or depth_dilate_left_val > 20.0:
-                raise ValueError("Dilate Left must be between 0 and 20.")
-            if depth_blur_left_val < 0 or depth_blur_left_val > 20:
-                raise ValueError("Blur Left must be between 0 and 20.")
-
-        except ValueError as e:
+            settings = self._get_processing_settings()
+        except (ValueError, TypeError) as e:
             self.status_label.config(text=f"Error: {e}")
             self.start_button.config(state="normal")
             self.stop_button.config(state="disabled")
             return
 
-        settings = self._get_processing_settings()
+        is_valid, err_msg = self.batch_processor.validate_settings(settings)
+        if not is_valid:
+            self.status_label.config(text=f"Error: {err_msg}")
+            self.start_button.config(state="normal")
+            self.stop_button.config(state="disabled")
+            return
 
         # Start processing in a new thread
         threading.Thread(target=self._run_batch_process, args=(settings,)).start()

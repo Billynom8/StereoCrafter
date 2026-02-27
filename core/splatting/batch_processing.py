@@ -151,6 +151,56 @@ class ProcessingSettings:
     sidecar_folder: str = ""
     track_dp_total_true_on_render: bool = False
 
+    # ------------------------------------------------------------------
+    # Factory
+    # ------------------------------------------------------------------
+    @classmethod
+    def from_config(cls, config: dict, **overrides) -> "ProcessingSettings":
+        """Build a ProcessingSettings from a flat config dict.
+
+        Keys in *config* are matched to dataclass field names.  Numeric
+        fields are coerced automatically.  Any explicit *overrides* are
+        applied last so the caller can inject values that don't live in
+        the config dict (e.g. ``sidecar_folder``, ``is_test_mode``).
+
+        Unknown keys in *config* are silently ignored.
+        """
+        import dataclasses as _dc
+
+        field_names = {f.name for f in _dc.fields(cls)}
+        field_types = {f.name: f.type for f in _dc.fields(cls)}
+
+        # --- Key aliases (config key -> dataclass field) ---------------
+        _ALIASES = {
+            "convergence_point": "zero_disparity_anchor",
+            "batch_size": "full_res_batch_size",
+            "pre_res_width": "low_res_width",
+            "pre_res_height": "low_res_height",
+            "enable_full_resolution": "enable_full_resolution",
+            "enable_low_resolution": "enable_low_resolution",
+        }
+
+        kwargs: dict = {}
+        for key, value in config.items():
+            field = _ALIASES.get(key, key)
+            if field not in field_names:
+                continue
+            # Light type coercion
+            target = field_types.get(field, "str")
+            try:
+                if target == "float":
+                    value = float(value)
+                elif target == "int":
+                    value = int(value)
+                elif target == "bool" and not isinstance(value, bool):
+                    value = str(value).lower() in ("true", "1", "yes")
+            except (ValueError, TypeError):
+                pass
+            kwargs[field] = value
+
+        kwargs.update(overrides)
+        return cls(**kwargs)
+
 
 @dataclass
 class BatchSetupResult:
