@@ -2,7 +2,7 @@
 
 All notable changes to the splatting GUI and related components.
 
-## Version 26-02-26.1
+## Version 26-02-26.2
 
 ### Fixed
 
