@@ -19,7 +19,7 @@ from .stereocrafter_util import (
     get_video_stream_info,
 )
 
-VERSION = "26-01-30.0"
+VERSION = "26-02-26.2"
 
 
 class VideoPreviewer(ttk.Frame):
@@ -1524,9 +1524,8 @@ class VideoPreviewer(ttk.Frame):
                         else:
                             frame_np = reader.get_batch([frame_idx]).asnumpy()
                         # IMPORTANT: keep depth as RAW values (8-bit stays 0..255, 10-bit stays 0..1023+)
-                        frame_tensor = (
-                            torch.from_numpy(frame_np).permute(0, 3, 1, 2).float()
-                        )
+                        # Keep original dtype to match Render engine (uint16/uint8)
+                        frame_tensor = torch.from_numpy(frame_np).permute(0, 3, 1, 2)
                     else:
                         frame_np = reader.get_batch([frame_idx]).asnumpy()
                         frame_tensor = (
@@ -1836,6 +1835,7 @@ class VideoPreviewer(ttk.Frame):
         # Detect MSB-aligned samples (common when decoding 10-bit into 16-bit containers)
         if self._depth_msb_shift is None:
             bd = int(self._depth_bit_depth) if self._depth_bit_depth else 16
+            self._use_16_to_n_scale = False
             if 0 < bd < 16:
                 expected_max = (1 << bd) - 1
                 max_val = int(arr.max(initial=0))
@@ -1845,13 +1845,20 @@ class VideoPreviewer(ttk.Frame):
                         self._depth_msb_shift = shift
                     else:
                         self._depth_msb_shift = 0
+                        self._use_16_to_n_scale = True
                 else:
                     self._depth_msb_shift = 0
             else:
                 self._depth_msb_shift = 0
 
-        if self._depth_msb_shift:
+        if self._depth_msb_shift and self._depth_msb_shift > 0:
             arr = (arr >> self._depth_msb_shift).astype(np.uint16, copy=False)
+        elif getattr(self, "_use_16_to_n_scale", False):
+            # Scale 16-bit to native N-bit (Sync with FFmpegDepthPipeReader)
+            bd = int(self._depth_bit_depth) if self._depth_bit_depth else 16
+            expected_max = (1 << bd) - 1
+            arr32 = arr.astype(np.uint32)
+            arr = ((arr32 * expected_max + 32767) // 65535).astype(np.uint16)
 
         return arr.copy()
 

@@ -156,6 +156,13 @@ class RenderProcessor:
         max_expected_raw_value = self._get_max_expected_raw_depth(depth_stream_info)
         logger.debug(f"[DEPTH] Max expected raw value: {max_expected_raw_value}, assume_raw_input: {assume_raw_input}, global_depth_min: {global_depth_min:.2f}, global_depth_max: {global_depth_max:.2f}")
         
+        tv_disp_comp = 1.0
+        if assume_raw_input and depth_stream_info and max_expected_raw_value > 256.0:
+            if str(depth_stream_info.get("color_range", "")).lower() == "tv":
+                from core.splatting.depth_processing import DEPTH_VIS_TV10_WHITE_NORM, DEPTH_VIS_TV10_BLACK_NORM
+                tv_disp_comp = 1.0 / (DEPTH_VIS_TV10_WHITE_NORM - DEPTH_VIS_TV10_BLACK_NORM)
+                logger.debug(f"[DEPTH] TV range compensation enabled: {tv_disp_comp:.3f}")
+        
         frame_count = 0
         encoding_successful = True
 
@@ -187,6 +194,7 @@ class RenderProcessor:
                     max_expected_raw_value=max_expected_raw_value,
                     zero_disparity_anchor_val=zero_disparity_anchor_val,
                     depth_gamma=depth_gamma,
+                    debug_task_name="Render",
                 )
                 
                 logger.debug(f"[DEPTH] After normalization and gamma: min={batch_depth_normalized.min():.4f}, max={batch_depth_normalized.max():.4f}")
@@ -228,6 +236,7 @@ class RenderProcessor:
                     max_disp=max_disp,
                     zero_disparity_anchor_val=zero_disparity_anchor_val,
                     input_bias=input_bias,
+                    tv_disp_comp=tv_disp_comp,
                 )
 
                 # 5. Handle results (diag tests or FFmpeg write)
@@ -315,21 +324,30 @@ class RenderProcessor:
         except Exception: pass
 
     def _get_max_expected_raw_depth(self, info: Optional[dict]) -> float:
-        pix_fmt = info.get("pix_fmt") if info else None
-        profile = info.get("profile") if info else None
-        logger.debug(f"[DEPTH] Detecting bit depth from depth_stream_info: pix_fmt={pix_fmt}, profile={profile}, full_info={info}")
+        pix_fmt = str(info.get("pix_fmt", "")).lower() if info else ""
+        profile = str(info.get("profile", "")).lower() if info else ""
+        
+        logger.debug(f"[DEPTH] Detecting bit depth: pix_fmt='{pix_fmt}', profile='{profile}'")
+        
+        # 1. Check for High-Bit Formats
+        if "16" in pix_fmt or "gray16" in pix_fmt:
+            return 65535.0
+        if "12" in pix_fmt:
+            return 4095.0
+        if "10" in pix_fmt or "main10" in profile or "gray10" in pix_fmt:
+            return 1023.0
+            
+        # 2. Check for Float
+        if "float" in pix_fmt or "f32" in pix_fmt:
+            return 1.0
+            
+        # 3. Default to 8-bit Range (255.0) for everything else (yuv420p, nv12, gray, etc.)
+        # This is safer than 1.0 as it prevents "washed out/white" depth maps if detection is slightly off.
         if pix_fmt:
-            if "10" in pix_fmt or "gray10" in pix_fmt or "12" in pix_fmt or (profile and "main10" in profile):
-                logger.debug(f"[DEPTH] Detected 10-bit depth (pix_fmt={pix_fmt})")
-                return 1023.0
-            if "8" in pix_fmt or pix_fmt in ["yuv420p", "yuv422p", "yuv444p"]:
-                logger.debug(f"[DEPTH] Detected 8-bit depth (pix_fmt={pix_fmt})")
-                return 255.0
-            if "float" in pix_fmt:
-                logger.debug(f"[DEPTH] Detected float depth (pix_fmt={pix_fmt})")
-                return 1.0
-        logger.warning(f"[DEPTH] Could not detect bit depth, defaulting to 1.0 (pix_fmt={pix_fmt})")
-        return 1.0
+            logger.debug(f"[DEPTH] Defaulting to 8-bit (255.0) for pix_fmt='{pix_fmt}'")
+            return 255.0
+            
+        return 255.0
 
     def _process_gpu_splatting(
         self,
@@ -341,6 +359,7 @@ class RenderProcessor:
         max_disp: float,
         zero_disparity_anchor_val: float,
         input_bias: float,
+        tv_disp_comp: float = 1.0,
     ) -> List[np.ndarray]:
         """Process GPU splatting on normalized depth maps.
         
@@ -382,20 +401,20 @@ class RenderProcessor:
         source_tensor = torch.from_numpy(batch_video_numpy).permute(0, 3, 1, 2).float().cuda() / 255.0
         depth_tensor = torch.from_numpy(batch_depth_numpy_float).unsqueeze(1).float().cuda()
 
-        # Depth is already normalized to [0, 1], just clip and apply bias
-        depth_tensor = torch.clip(depth_tensor, 0.0, 1.0)
+        from core.splatting.forward_warp import execute_forward_warp
         
-        if input_bias != 0:
-            depth_tensor = torch.clip(depth_tensor + input_bias, 0.0, 1.0)
-
-        # Disparity calculation
-        disp_map = (depth_tensor - zero_disparity_anchor_val) * 2.0
-        actual_max_disp_pixels = (max_disp / 20.0 / 100.0) * target_width
-        disp_map = disp_map * actual_max_disp_pixels
-
-        # Forward warp
-        with torch.no_grad():
-            right_eye_raw, occlusion_mask = stereo_projector(source_tensor, disp_map)
+        right_eye_raw, occlusion_mask = execute_forward_warp(
+            stereo_projector=stereo_projector,
+            source_tensor=source_tensor,
+            depth_tensor=depth_tensor,
+            target_width=target_width,
+            max_disp=max_disp,
+            zero_disparity_anchor_val=zero_disparity_anchor_val,
+            input_bias=input_bias,
+            tv_disp_comp=tv_disp_comp,
+            debug_task_name="Render",
+        )
+        
         
         # CPU conversion
         left_cpu = source_tensor.cpu().numpy()

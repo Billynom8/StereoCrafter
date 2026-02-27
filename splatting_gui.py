@@ -87,7 +87,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-26.1"
+GUI_VERSION = "26-02-26.2"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -3331,6 +3331,7 @@ class SplatterGUI(ThemedTk):
             depth_blur_left=depth_blur_left,
             depth_blur_left_mix=mix_f,
             skip_preprocessing=skip_preprocessing,
+            debug_task_name=debug_task_name,
         )
 
     def _preview_processing_callback(self, source_frames: dict, params: dict) -> Optional[Image.Image]:
@@ -3505,39 +3506,53 @@ class SplatterGUI(ThemedTk):
 
         # --- END NEW CACHE LOGIC ---
 
-        # Determine the scaling factor (Only relevant for MANUAL/RAW mode)
-        final_scaling_factor = 1.0
+        # Determine the correct scaling base (max RAW value) based on bit depth detected by previewer
+        # 1. Scaling Logic
+        depth_bits = getattr(self.previewer, "_depth_bit_depth", 8)
+        max_val_in_frame = float(depth_numpy_raw.max())
+        
+        if depth_bits == 16:
+            max_raw_value = 65535.0
+        elif depth_bits == 12:
+            max_raw_value = 4095.0
+        elif depth_bits == 10:
+            max_raw_value = 1023.0
+        else:
+            if max_val_in_frame > 256.0: max_raw_value = 1023.0
+            elif max_val_in_frame > 1.05: max_raw_value = 255.0
+            else: max_raw_value = 1.0
+            
+        final_scaling_factor = max_raw_value 
+        
+        # NOTE: if enable_global_norm is True, we use global_max/min for the normalization curve.
+        # But final_scaling_factor is the "base" we scale back up to after normalization
+        # so that dilation/blur kerels (which are pixel-based) feel consistent.
+        preview_global_max = global_max if enable_global_norm else 1.0
+        # logger.debug(f"Preview: BitDepth={depth_bits}, RawMax={max_val_in_frame:.1f}, Dtype={depth_numpy_raw.dtype}, GN={enable_global_norm}. Scaling Base: {final_scaling_factor:.1f}")
 
-        if not enable_global_norm:  # MANUAL/RAW INPUT MODE
-            if max_raw_content_value <= 256.0 and max_raw_content_value > 1.0:
-                final_scaling_factor = 255.0
-            elif max_raw_content_value > 256.0 and max_raw_content_value <= 1024.0:
-                final_scaling_factor = max_raw_content_value
-            elif max_raw_content_value > 1024.0:
-                final_scaling_factor = 65535.0
-            else:
-                final_scaling_factor = 1.0
-        else:  # GLOBAL NORMALIZATION MODE
-            # Use the global max from the cache/scan as the "max value" for scaling (only to correctly apply pre-processing if needed)
-            final_scaling_factor = max(global_max, 1e-5)
-
-        logger.debug(f"Preview: GN={enable_global_norm}. Final Scaling Factor for Pre-Proc: {final_scaling_factor:.3f}")
-
-        # --- UNIFICATION STEP 2: NORMALIZE & GAMMA BEFORE DILATE/BLUR ---
+        # --- UNIFICATION STEP: Match Render Scaling Logic ---
         from core.splatting.depth_processing import normalize_and_gamma_depth
-
+        
+        # Render engine passes global_depth_max=1.0 for assume_raw_input=True
+        # because the input is expected to be scaled by max_expected_raw_value inside normalize_and_gamma.
+        
         batch_depth_normalized = normalize_and_gamma_depth(
             batch_depth_numpy_raw=np.expand_dims(depth_numpy_raw, axis=0),
             assume_raw_input=not enable_global_norm,
-            global_depth_max=global_max if enable_global_norm else final_scaling_factor,
+            global_depth_max=preview_global_max,
             global_depth_min=global_min if enable_global_norm else 0.0,
             max_expected_raw_value=final_scaling_factor,
             zero_disparity_anchor_val=params.get("convergence_point", 0.0),
             depth_gamma=params["depth_gamma"],
+            debug_task_name="Preview",
         )
 
         # Scale back to max_raw_value range so dilation/blur work correctly
         batch_depth_for_processing = batch_depth_normalized * final_scaling_factor
+        
+        # Ensure 4D with 1 channel [Batch, H, W, 1] to match Render engine
+        if batch_depth_for_processing.ndim == 3:
+            batch_depth_for_processing = batch_depth_for_processing[..., None]
 
         depth_numpy_processed = self._process_depth_batch(
             batch_depth_numpy_raw=batch_depth_for_processing,
@@ -3594,8 +3609,6 @@ class SplatterGUI(ThemedTk):
                 disp_map_tensor, size=(H_target, W_target), mode="bilinear", align_corners=False
             )
 
-        disp_map_tensor = (disp_map_tensor - params["convergence_point"]) * 2.0
-
         tv_disp_comp = 1.0
         if not enable_global_norm:
             try:
@@ -3614,10 +3627,6 @@ class SplatterGUI(ThemedTk):
                             tv_disp_comp = 1.0 / (DEPTH_VIS_TV10_WHITE_NORM - DEPTH_VIS_TV10_BLACK_NORM)
             except Exception:
                 tv_disp_comp = 1.0
-
-        # Calculate disparity in pixels based on the TARGET width (W_target)
-        actual_max_disp_pixels = (params["max_disp"] / 20.0 / 100.0) * W_target * tv_disp_comp
-        disp_map_tensor = disp_map_tensor * actual_max_disp_pixels
 
         # Preview-only depth/pop separation metrics (percent of screen width)
         # Uses a lightweight sampled scan of the current normalized depth map.
@@ -3668,12 +3677,21 @@ class SplatterGUI(ThemedTk):
         except Exception:
             pass
 
-        with torch.no_grad():
-            # Use the potentially resized Left Eye
-            right_eye_tensor_raw, occlusion_mask = stereo_projector(left_eye_tensor_resized, disp_map_tensor)
+        from core.splatting.forward_warp import execute_forward_warp
+        
+        right_eye_tensor_raw, occlusion_mask = execute_forward_warp(
+            stereo_projector=stereo_projector,
+            source_tensor=left_eye_tensor_resized,
+            depth_tensor=disp_map_tensor,
+            target_width=W_target,
+            max_disp=params["max_disp"],
+            zero_disparity_anchor_val=params["convergence_point"],
+            input_bias=0.0,
+            tv_disp_comp=tv_disp_comp,
+            debug_task_name="Preview",
+        )
 
-            # Apply low-res specific post-processing
-            right_eye_tensor = right_eye_tensor_raw
+        right_eye_tensor = right_eye_tensor_raw
 
         # --- Apply black borders for Anaglyph and Wigglegram ---
         if preview_source in ["Anaglyph 3D", "Dubois Anaglyph", "Optimized Anaglyph", "Wigglegram"]:

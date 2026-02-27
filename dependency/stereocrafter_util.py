@@ -16,7 +16,89 @@ import gc
 import time
 import re
 
-VERSION = "26-01-30.0"
+VERSION = "26-02-26.2"
+
+def dump_debug_tensor(tensor_or_numpy, stage_name: str, session_id: str):
+    import logging
+    # Force enabled for this debug session
+    # if not logging.getLogger().isEnabledFor(logging.DEBUG):
+    #     return
+    import os, cv2, numpy as np
+    import torch
+    base_dir = os.path.join("debug_dumps", session_id)
+    os.makedirs(base_dir, exist_ok=True)
+    
+    if isinstance(tensor_or_numpy, torch.Tensor):
+        t = tensor_or_numpy.detach().cpu().numpy()
+    else:
+        t = np.copy(tensor_or_numpy)
+        
+    while t.ndim > 4:
+        t = t[0]
+    if t.ndim == 4:
+        t = t[0]
+
+    # Now t is 3D or 2D
+    if t.ndim == 3:
+        if t.shape[0] == 1 or t.shape[0] == 3:
+            t = t.transpose(1, 2, 0)
+        elif t.shape[-1] != 1 and t.shape[-1] != 3:
+            # likely [Batch, H, W]
+            t = t[0]
+        
+    # If it's a depth map with high values (10-bit or 16-bit), normalize for view
+    # Convert to float for safe math
+    t_float = t.astype(np.float32)
+    max_val = float(t_float.max())
+    
+    if max_val > 1.1:
+        if max_val <= 256.0:
+            t_out = t_float
+        elif max_val <= 1024.0:
+            t_out = (t_float / 1023.0) * 255.0
+        elif max_val <= 4096.0:
+            t_out = (t_float / 4095.0) * 255.0
+        else:
+            t_out = (t_float / 65535.0) * 255.0
+    else:
+        # 0.0-1.0 range
+        t_out = t_float * 255.0
+        
+    t_final = np.clip(t_out, 0, 255).astype(np.uint8)
+    
+    if t_final.ndim == 3 and t_final.shape[-1] == 3:
+        t_final = cv2.cvtColor(t_final, cv2.COLOR_RGB2BGR)
+        
+    cv2.imwrite(os.path.join(base_dir, f"{stage_name}.png"), t_final)
+
+
+def log_debug_args(args_dict: dict, function_name: str, session_id: str):
+    import os, json
+    base_dir = os.path.join("debug_dumps", session_id)
+    os.makedirs(base_dir, exist_ok=True)
+    
+    # Filter for JSON serializable types
+    serializable_args = {}
+    for k, v in args_dict.items():
+        if hasattr(v, "shape"): # Tensors/Numpy
+            serializable_args[k] = f"Tensor/Array {list(v.shape)} {v.dtype}"
+        elif isinstance(v, (str, int, float, bool)) or v is None:
+            serializable_args[k] = v
+        else:
+            serializable_args[k] = str(v)
+
+            
+    log_file = os.path.join(base_dir, f"{function_name}_args.json")
+    # Append or overwrite? Overwrite for now to match the PNG behavior if user prefers, 
+    # but maybe separate files for Preview vs Render based on a key?
+    # Let's use the task_name as part of the filename if available in args.
+    task_name = args_dict.get("debug_task_name", "generic")
+    filename = f"{function_name}_{task_name}_args.json"
+    
+    with open(os.path.join(base_dir, filename), "w") as f:
+        json.dump(serializable_args, f, indent=4)
+
+
 
 # --- Configure Logging ---
 # Only configure basic logging if no handlers are already set up.
