@@ -86,7 +86,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-27.8"
+GUI_VERSION = "26-02-27.9"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -110,11 +110,7 @@ from core.splatting.config_manager import ConfigManager
 # [REFACTORED] Video I/O and Theme functions replaced with core imports
 from core.common import ThemeManager
 from core.common.video_io import read_video_frames, _NumpyBatch
-from core.common.sidecar_manager import (
-    SidecarConfigManager,
-    find_sidecar_file,
-    read_clip_sidecar
-)
+from core.common.sidecar_manager import SidecarConfigManager, find_sidecar_file, read_clip_sidecar
 from core.ui.sbs_preview import SBSPreviewWindow
 
 
@@ -242,9 +238,17 @@ class SplatterGUI(ThemedTk):
 
         self.dark_mode_var = tk.BooleanVar(value=False)
         self.input_source_clips_var = tk.StringVar(value="./input_source_clips")
-        self.input_source_clips_var.trace_add("write", lambda *args: self.previewer.reset_video_list_scan() if hasattr(self, "previewer") else None)
+        self.input_source_clips_var.trace_add(
+            "write", lambda *args: self.previewer.reset_video_list_scan() if hasattr(self, "previewer") else None
+        )
         self.input_depth_maps_var = tk.StringVar(value="./input_depth_maps")
-        self.input_depth_maps_var.trace_add("write", lambda *args: (self._on_depth_map_folder_changed(), self.previewer.reset_video_list_scan() if hasattr(self, "previewer") else None))
+        self.input_depth_maps_var.trace_add(
+            "write",
+            lambda *args: (
+                self._on_depth_map_folder_changed(),
+                self.previewer.reset_video_list_scan() if hasattr(self, "previewer") else None,
+            ),
+        )
         self.multi_map_var = tk.BooleanVar(value=False)
         self.selected_depth_map_var = tk.StringVar(value="")
         self.depth_map_subfolders = []
@@ -333,6 +337,9 @@ class SplatterGUI(ThemedTk):
         self.max_disp_var.trace_add("write", self._on_convergence_or_disparity_changed)
         self.border_mode_var.trace_add("write", self._on_border_mode_change)
 
+        # Add traces to invalidate preview buffer when processing parameters change
+        self._add_preview_buffer_traces()
+
         # --- Variables for "Current Processing Information" display ---
         self.processing_filename_var = tk.StringVar(value="N/A")
         self.processing_resolution_var = tk.StringVar(value="N/A")
@@ -385,7 +392,7 @@ class SplatterGUI(ThemedTk):
         self.after(100, self.check_queue)  # Start checking progress queue
 
         self.protocol("WM_DELETE_WINDOW", self.exit_app)
-        
+
         # --- NEW: Bind clicks on main UI surface to take focus away from Entries ---
         # This allows hotkeys to work again after clicking "out" of a text field.
         self.bind("<Button-1>", self._on_bg_click)
@@ -513,6 +520,33 @@ class SplatterGUI(ThemedTk):
         if self.auto_save_sidecar_var.get():
             self._save_current_sidecar_data(is_auto_save=True)
 
+    def _on_preview_frame_display(self, frame_idx: int, frame_was_cached: bool):
+        """
+        Callback invoked every time a preview frame is displayed.
+
+        This handles SBS window updates, using cached data when available.
+        Called whether the frame was freshly processed or retrieved from cache.
+        """
+        if not hasattr(self, "sbs_enabled_var") or not self.sbs_enabled_var.get():
+            return
+        if not hasattr(self, "sbs_window_obj") or not self.sbs_window_obj:
+            return
+
+        # Try to use cached SBS frame data
+        cached_sbs = self.previewer.get_cached_sbs_frame(frame_idx)
+
+        if cached_sbs is not None:
+            left_np, right_np = cached_sbs
+            left_tensor = torch.from_numpy(left_np).permute(2, 0, 1).float() / 255.0
+            right_tensor = torch.from_numpy(right_np).permute(2, 0, 1).float() / 255.0
+            left_tensor = left_tensor.unsqueeze(0)
+            right_tensor = right_tensor.unsqueeze(0)
+            self.sbs_window_obj.update_frame(left_tensor, right_tensor, overlays_callback=self._draw_sbs_overlays)
+        elif not frame_was_cached:
+            # Frame was just processed, SBS should already be updated in callback
+            # This is a fallback in case SBS wasn't updated
+            pass
+
     def _browse_folder(self, var):
         """Opens a folder dialog and updates a StringVar."""
         current_path = var.get()
@@ -574,9 +608,7 @@ class SplatterGUI(ThemedTk):
         Delegates to AnalysisService.compute_clip_global_depth_stats (no GUI deps).
         """
         result = AnalysisService.compute_clip_global_depth_stats(
-            depth_map_path=depth_map_path,
-            stop_event=self.stop_event,
-            chunk_size=chunk_size,
+            depth_map_path=depth_map_path, stop_event=self.stop_event, chunk_size=chunk_size
         )
         # Cache the result so downstream code can read it.
         self.cache.store_clip_norm(depth_map_path, result[0], result[1])
@@ -659,6 +691,35 @@ class SplatterGUI(ThemedTk):
             self.set_border_width_programmatically(w)
         if hasattr(self, "set_border_bias_programmatically"):
             self.set_border_bias_programmatically(b)
+
+    def _add_preview_buffer_traces(self):
+        """Add traces to invalidate preview buffer when processing parameters change."""
+
+        def _invalidate_buffer(*args):
+            if hasattr(self, "previewer") and self.previewer is not None:
+                self.previewer.invalidate_frame_buffer()
+
+        vars_to_trace = [
+            self.zero_disparity_anchor_var,
+            self.max_disp_var,
+            self.depth_gamma_var,
+            self.depth_dilate_size_x_var,
+            self.depth_dilate_size_y_var,
+            self.depth_blur_size_x_var,
+            self.depth_blur_size_y_var,
+            self.depth_dilate_left_var,
+            self.depth_blur_left_var,
+            self.depth_blur_left_mix_var,
+            self.border_width_var,
+            self.border_bias_var,
+            self.border_mode_var,
+            self.auto_border_L_var,
+            self.auto_border_R_var,
+            self.preview_source_var,
+            self.preview_size_var,
+        ]
+        for var in vars_to_trace:
+            var.trace_add("write", _invalidate_buffer)
 
     def _on_border_mode_change(self, *args):
         """Called when the 'Border' mode pulldown is changed."""
@@ -1349,11 +1410,7 @@ class SplatterGUI(ThemedTk):
         self._create_hover_tooltip(lbl_encoder, "encoding_encoder")
 
         cb_encoder = ttk.Combobox(
-            outer,
-            textvariable=self.encoding_encoder_var,
-            values=("Auto", "Force CPU"),
-            state="readonly",
-            width=20,
+            outer, textvariable=self.encoding_encoder_var, values=("Auto", "Force CPU"), state="readonly", width=20
         )
         cb_encoder.grid(row=row, column=1, sticky="w", pady=3)
 
@@ -1404,12 +1461,7 @@ class SplatterGUI(ThemedTk):
         self._create_hover_tooltip(lbl_laf, "encoding_nvenc_lookahead")
 
         sp_la = ttk.Spinbox(
-            nv_frame,
-            from_=0,
-            to=64,
-            increment=1,
-            textvariable=self.encoding_nvenc_lookahead_var,
-            width=8,
+            nv_frame, from_=0, to=64, increment=1, textvariable=self.encoding_nvenc_lookahead_var, width=8
         )
         sp_la.grid(row=nv_r, column=1, sticky="w", pady=2)
 
@@ -1433,12 +1485,7 @@ class SplatterGUI(ThemedTk):
         self._create_hover_tooltip(lbl_aq, "encoding_nvenc_aq_strength")
 
         sp_aq = ttk.Spinbox(
-            nv_frame,
-            from_=1,
-            to=15,
-            increment=1,
-            textvariable=self.encoding_nvenc_aq_strength_var,
-            width=8,
+            nv_frame, from_=1, to=15, increment=1, textvariable=self.encoding_nvenc_aq_strength_var, width=8
         )
         sp_aq.grid(row=nv_r, column=1, sticky="w", pady=2)
 
@@ -1487,7 +1534,9 @@ class SplatterGUI(ThemedTk):
                 pass
 
             try:
-                aq_on = bool(self.encoding_nvenc_spatial_aq_var.get()) or bool(self.encoding_nvenc_temporal_aq_var.get())
+                aq_on = bool(self.encoding_nvenc_spatial_aq_var.get()) or bool(
+                    self.encoding_nvenc_temporal_aq_var.get()
+                )
             except Exception:
                 aq_on = False
             try:
@@ -1519,7 +1568,6 @@ class SplatterGUI(ThemedTk):
             win.bind("<Escape>", lambda e: win.destroy())
         except Exception:
             pass
-
 
     def _create_widgets(self):
         """Initializes and places all GUI widgets."""
@@ -1570,7 +1618,6 @@ class SplatterGUI(ThemedTk):
         self.options_menu = tk.Menu(self.menubar, tearoff=0)
         self.options_menu.add_command(label="Encoding Options...", command=self.show_encoding_options_popup)
         self.menubar.add_cascade(label="Options", menu=self.options_menu)
-
 
         self.help_menu = tk.Menu(self.menubar, tearoff=0)
         self.debug_logging_var = tk.BooleanVar(value=self._debug_logging_enabled)
@@ -1678,6 +1725,7 @@ class SplatterGUI(ThemedTk):
             resize_callback=self._adjust_window_height_for_content,  # Pass the resize callback
             update_clip_callback=self._update_clip_state_and_text,
             on_clip_navigate_callback=self._on_clip_navigate_with_cache_clear,
+            on_frame_display_callback=self._on_preview_frame_display,
             help_data=self.help_texts,
         )
         self.previewer.pack(fill="both", expand=True, padx=10, pady=1)
@@ -2248,9 +2296,7 @@ class SplatterGUI(ThemedTk):
             variable=self.depth_pop_enabled_var,
             takefocus=False,
             command=lambda: (
-                (
-                    getattr(self.previewer, "set_depth_pop_enabled", lambda *_: None)(self.depth_pop_enabled_var.get()),
-                )
+                (getattr(self.previewer, "set_depth_pop_enabled", lambda *_: None)(self.depth_pop_enabled_var.get()),)
                 if getattr(self, "previewer", None)
                 else None
             ),
@@ -2260,11 +2306,7 @@ class SplatterGUI(ThemedTk):
 
         # SBS preview (separate window; preview-only)
         self.sbs_checkbox = ttk.Checkbutton(
-            checkbox_row,
-            text="SBS",
-            variable=self.sbs_enabled_var,
-            takefocus=False,
-            command=self._on_sbs_toggle,
+            checkbox_row, text="SBS", variable=self.sbs_enabled_var, takefocus=False, command=self._on_sbs_toggle
         )
         self.sbs_checkbox.pack(side="left", padx=(24, 0))
         self._create_hover_tooltip(self.sbs_checkbox, "sbs_preview")
@@ -2477,8 +2519,9 @@ class SplatterGUI(ThemedTk):
     def _on_bg_click(self, event):
         """Take focus away from Entry widgets if clicking on background/labels."""
         # Check if the widget clicked is a "passive" one (Frame, Label, or the root window)
-        is_passive = (event.widget == self or 
-                      isinstance(event.widget, (tk.Frame, tk.Label, ttk.Frame, ttk.Label, ttk.LabelFrame)))
+        is_passive = event.widget == self or isinstance(
+            event.widget, (tk.Frame, tk.Label, ttk.Frame, ttk.Label, ttk.LabelFrame)
+        )
         if is_passive:
             self.focus_set()
 
@@ -3560,9 +3603,9 @@ class SplatterGUI(ThemedTk):
             mix_f = float(self.depth_blur_left_mix_var.get())
         except Exception:
             mix_f = 0.5
-            
+
         from core.splatting.depth_processing import process_depth_batch
-        
+
         return process_depth_batch(
             batch_depth_numpy_raw=batch_depth_numpy_raw,
             depth_gamma=depth_gamma,
@@ -3754,18 +3797,19 @@ class SplatterGUI(ThemedTk):
         # Determine the correct scaling base (max RAW value) using Render-parity logic
         # 1. Scaling Logic
         depth_bits = getattr(self.previewer, "_depth_bit_depth", 0)
-        
+
         # If previewer hasn't tagged the bit depth, or it's default 8, double-check from file info
         # to ensure parity with the renderer's ffprobe-based detection.
         if (depth_bits <= 8) and depth_map_path:
-             if not hasattr(self, "_depth_bits_cache"): self._depth_bits_cache = {}
-             if depth_map_path not in self._depth_bits_cache:
-                 info = get_video_stream_info(depth_map_path)
-                 self._depth_bits_cache[depth_map_path] = _infer_depth_bit_depth(info)
-             depth_bits = max(depth_bits, self._depth_bits_cache[depth_map_path])
+            if not hasattr(self, "_depth_bits_cache"):
+                self._depth_bits_cache = {}
+            if depth_map_path not in self._depth_bits_cache:
+                info = get_video_stream_info(depth_map_path)
+                self._depth_bits_cache[depth_map_path] = _infer_depth_bit_depth(info)
+            depth_bits = max(depth_bits, self._depth_bits_cache[depth_map_path])
 
         max_val_in_frame = float(depth_numpy_raw.max())
-        
+
         if depth_bits == 16:
             max_raw_value = 65535.0
         elif depth_bits == 12:
@@ -3776,12 +3820,15 @@ class SplatterGUI(ThemedTk):
             max_raw_value = 255.0
         else:
             # Fallback auto-detection for truly untagged sources (e.g. numpy arrays)
-            if max_val_in_frame > 256.0: max_raw_value = 1023.0
-            elif max_val_in_frame > 1.05: max_raw_value = 255.0
-            else: max_raw_value = 1.0
-            
-        final_scaling_factor = max_raw_value 
-        
+            if max_val_in_frame > 256.0:
+                max_raw_value = 1023.0
+            elif max_val_in_frame > 1.05:
+                max_raw_value = 255.0
+            else:
+                max_raw_value = 1.0
+
+        final_scaling_factor = max_raw_value
+
         # NOTE: if enable_global_norm is True, we use global_max/min for the normalization curve.
         # But final_scaling_factor is the "base" we scale back up to after normalization
         # so that dilation/blur kerels (which are pixel-based) feel consistent.
@@ -3790,10 +3837,10 @@ class SplatterGUI(ThemedTk):
 
         # --- UNIFICATION STEP: Match Render Scaling Logic ---
         from core.splatting.depth_processing import normalize_and_gamma_depth
-        
+
         # Render engine passes global_depth_max=1.0 for assume_raw_input=True
         # because the input is expected to be scaled by max_expected_raw_value inside normalize_and_gamma.
-        
+
         batch_depth_normalized = normalize_and_gamma_depth(
             batch_depth_numpy_raw=np.expand_dims(depth_numpy_raw, axis=0),
             assume_raw_input=not enable_global_norm,
@@ -3807,7 +3854,7 @@ class SplatterGUI(ThemedTk):
 
         # Scale back to max_raw_value range so dilation/blur work correctly
         batch_depth_for_processing = batch_depth_normalized * final_scaling_factor
-        
+
         # Ensure 4D with 1 channel [Batch, H, W, 1] to match Render engine
         if batch_depth_for_processing.ndim == 3:
             batch_depth_for_processing = batch_depth_for_processing[..., None]
@@ -3890,10 +3937,9 @@ class SplatterGUI(ThemedTk):
         # Uses a lightweight sampled scan of the current normalized depth map.
         try:
             if getattr(self, "previewer", None) is not None and hasattr(self.previewer, "set_depth_pop_metrics"):
-                show_metrics = (
-                    bool(self.depth_pop_enabled_var.get()) and 
-                    (preview_source in ("Anaglyph 3D", "Dubois Anaglyph", "Optimized Anaglyph") or
-                     (getattr(self, "sbs_enabled_var", None) is not None and self.sbs_enabled_var.get()))
+                show_metrics = bool(self.depth_pop_enabled_var.get()) and (
+                    preview_source in ("Anaglyph 3D", "Dubois Anaglyph", "Optimized Anaglyph")
+                    or (getattr(self, "sbs_enabled_var", None) is not None and self.sbs_enabled_var.get())
                 )
                 if show_metrics:
                     _stride = 8  # sample stride for speed (1/64 pixels)
@@ -3960,7 +4006,7 @@ class SplatterGUI(ThemedTk):
             pass
 
         from core.splatting.forward_warp import execute_forward_warp
-        
+
         right_eye_tensor_raw, occlusion_mask = execute_forward_warp(
             stereo_projector=stereo_projector,
             source_tensor=left_eye_tensor_resized,
@@ -4080,6 +4126,12 @@ class SplatterGUI(ThemedTk):
             return None
         else:
             final_tensor = right_eye_tensor.cpu()
+
+        # Cache the SBS frame data for fast playback
+        frame_idx = int(self.previewer.frame_scrubber_var.get())
+        left_np_cache = (left_eye_tensor_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        right_np_cache = (right_eye_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+        self.previewer.cache_sbs_frame(frame_idx, left_np_cache, right_np_cache)
 
         # Update the SBS preview window if enabled.
         # This sends Left=Original, Right=Full Splat (from right_eye_tensor).
@@ -5321,7 +5373,7 @@ class SplatterGUI(ThemedTk):
         try:
             # Automate parameters that map directly
             gui_save_data = self.sidecar_manager.capture_from_gui(self.__dict__, mapping=self.GUI_SIDECAR_VAR_MAP)
-            
+
             # Add specific formatting/overrides
             gui_save_data["gamma"] = float(f"{self._safe_float(self.depth_gamma_var, 1.0):.2f}")
             gui_save_data["depth_blur_left"] = int(round(self._safe_float(self.depth_blur_left_var)))
@@ -5330,14 +5382,18 @@ class SplatterGUI(ThemedTk):
             w = self._safe_float(self.border_width_var)
             b = self._safe_float(self.border_bias_var)
             left_b, right_b = self.sidecar_manager.calculate_borders_from_width_bias(w, b)
-            
+
             gui_save_data["left_border"] = left_b
             gui_save_data["right_border"] = right_b
 
             # 3. Auto Adv values
-            gui_save_data["auto_border_L"] = force_auto_L if force_auto_L is not None else self._safe_float(self.auto_border_L_var)
-            gui_save_data["auto_border_R"] = force_auto_R if force_auto_R is not None else self._safe_float(self.auto_border_R_var)
-            
+            gui_save_data["auto_border_L"] = (
+                force_auto_L if force_auto_L is not None else self._safe_float(self.auto_border_L_var)
+            )
+            gui_save_data["auto_border_R"] = (
+                force_auto_R if force_auto_R is not None else self._safe_float(self.auto_border_R_var)
+            )
+
             # Transfer all to the final save dictionary
             current_data.update(gui_save_data)
 
@@ -5367,7 +5423,9 @@ class SplatterGUI(ThemedTk):
         else:
             logger.error(f"Sidecar Save: Failed to write sidecar file '{os.path.basename(json_sidecar_path)}'.")
             if not is_auto_save:
-                messagebox.showerror("Sidecar Error", f"Failed to write sidecar file '{os.path.basename(json_sidecar_path)}'.")
+                messagebox.showerror(
+                    "Sidecar Error", f"Failed to write sidecar file '{os.path.basename(json_sidecar_path)}'."
+                )
             return False
 
     def _save_debug_image(
@@ -5818,7 +5876,11 @@ class SplatterGUI(ThemedTk):
                 # Current frame index from preview scrubber (best-effort)
                 frame_idx = 0
                 try:
-                    if hasattr(self, "previewer") and self.previewer is not None and hasattr(self.previewer, "frame_scrubber_var"):
+                    if (
+                        hasattr(self, "previewer")
+                        and self.previewer is not None
+                        and hasattr(self.previewer, "frame_scrubber_var")
+                    ):
                         frame_idx = int(float(self.previewer.frame_scrubber_var.get()))
                 except Exception:
                     frame_idx = 0
@@ -6036,12 +6098,16 @@ class SplatterGUI(ThemedTk):
         """Reads the sidecar config for the given depth map path and updates GUI sliders."""
         # 1. Video Change Detection (for suppression flag)
         current_source_video = None
-        if hasattr(self, "previewer") and self.previewer and 0 <= self.previewer.current_video_index < len(self.previewer.video_list):
+        if (
+            hasattr(self, "previewer")
+            and self.previewer
+            and 0 <= self.previewer.current_video_index < len(self.previewer.video_list)
+        ):
             current_source_video = self.previewer.video_list[self.previewer.current_video_index].get("source_video")
 
         if current_source_video and current_source_video != getattr(self, "_last_loaded_source_video", None):
             self._suppress_sidecar_map_update = False
-            self._last_loaded_source_video = current_source_video 
+            self._last_loaded_source_video = current_source_video
 
         if not self.update_slider_from_sidecar_var.get() or not depth_map_path:
             return
@@ -6072,7 +6138,11 @@ class SplatterGUI(ThemedTk):
             disp_val = sidecar_config.get("max_disparity", self.max_disp_var.get())
             gamma_val = sidecar_config.get("gamma", self.depth_gamma_var.get())
             dp_seed = sidecar_config.get("dp_total_max_true") or sidecar_config.get("dp_total_max_est")
-            if dp_seed is not None and getattr(self, "previewer", None) and hasattr(self.previewer, "set_depth_pop_max_estimate"):
+            if (
+                dp_seed is not None
+                and getattr(self, "previewer", None)
+                and hasattr(self.previewer, "set_depth_pop_max_estimate")
+            ):
                 sig = self._dp_total_signature(depth_map_path, conv_val, disp_val, gamma_val)
                 self.previewer.set_depth_pop_max_estimate(float(dp_seed), sig)
         except Exception:
@@ -6082,7 +6152,7 @@ class SplatterGUI(ThemedTk):
         left_b = sidecar_config.get("left_border", 0.0)
         right_b = sidecar_config.get("right_border", 0.0)
         w, b = self.sidecar_manager.calculate_width_bias_from_borders(left_b, right_b)
-        
+
         self.border_width_var.set(f"{w:.2f}")
         self.border_bias_var.set(f"{b:.2f}")
 
@@ -6262,7 +6332,9 @@ class SplatterGUI(ThemedTk):
 
             preview_img = pending.get("preview_img", None)
 
-            kind = "maptest" if test_type.startswith("map") else ("splattest" if test_type.startswith("splat") else "test")
+            kind = (
+                "maptest" if test_type.startswith("map") else ("splattest" if test_type.startswith("splat") else "test")
+            )
             stem = f"{video_base}_frame_{frame_idx:05d}_{kind}"
 
             preview_labeled = (
@@ -6293,7 +6365,6 @@ class SplatterGUI(ThemedTk):
         except Exception as e:
             logger.error(f"Diagnostic capture save failed: {e}", exc_info=True)
 
-
     # ============================
     # SBS Preview Window (Update B) - Refactored to core.ui
     # ============================
@@ -6319,8 +6390,25 @@ class SplatterGUI(ThemedTk):
 
     def _update_sbs_preview_window(self, left_eye_tensor, right_eye_tensor):
         """Update SBS window with Left=Original, Right=Splatted."""
-        if self.sbs_window_obj and self.sbs_window_obj.exists():
-            self.sbs_window_obj.update_frame(left_eye_tensor, right_eye_tensor, overlays_callback=self._draw_sbs_overlays)
+        if not self.sbs_window_obj or not self.sbs_window_obj.exists():
+            return
+
+        # Try to get cached SBS frame data
+        frame_idx = int(self.previewer.frame_scrubber_var.get())
+        cached_sbs = self.previewer.get_cached_sbs_frame(frame_idx)
+
+        if cached_sbs is not None:
+            left_np, right_np = cached_sbs
+            # Convert numpy arrays back to tensors for the update_frame method
+            left_tensor = torch.from_numpy(left_np).permute(2, 0, 1).float() / 255.0
+            right_tensor = torch.from_numpy(right_np).permute(2, 0, 1).float() / 255.0
+            left_tensor = left_tensor.unsqueeze(0)
+            right_tensor = right_tensor.unsqueeze(0)
+            self.sbs_window_obj.update_frame(left_tensor, right_tensor, overlays_callback=self._draw_sbs_overlays)
+        elif left_eye_tensor is not None and right_eye_tensor is not None:
+            self.sbs_window_obj.update_frame(
+                left_eye_tensor, right_eye_tensor, overlays_callback=self._draw_sbs_overlays
+            )
 
     def _draw_sbs_overlays(self, img: Image.Image, sbs_obj):
         """Draw Crosshair + D/P overlays onto the SBS PIL image."""
@@ -6335,7 +6423,8 @@ class SplatterGUI(ThemedTk):
                 multi = bool(self.crosshair_multi_var.get())
                 sbs_obj.draw_bullseye_overlay(draw, 0, half_w, h_img, color, multi)
                 sbs_obj.draw_bullseye_overlay(draw, half_w, half_w, h_img, color, multi)
-        except Exception: pass
+        except Exception:
+            pass
 
         # Depth/Pop overlay
         try:
@@ -6365,11 +6454,10 @@ class SplatterGUI(ThemedTk):
                     for x_off in (0, half_w):
                         cx = x_off + (half_w // 2)
                         draw.text((cx - (tw // 2), y_txt), txt, fill=color, font=font)
-                        mw = (draw.textbbox((0, 0), max_txt, font=font)[2] - draw.textbbox((0, 0), max_txt, font=font)[0])
+                        mw = draw.textbbox((0, 0), max_txt, font=font)[2] - draw.textbbox((0, 0), max_txt, font=font)[0]
                         draw.text((x_off + half_w - mw - 10, y_txt), max_txt, fill=color, font=font)
-        except Exception: pass
-
-
+        except Exception:
+            pass
 
 
 # [REFACTORED] Depth processing functions imported from core module

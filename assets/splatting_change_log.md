@@ -2,6 +2,19 @@
 
 All notable changes to the splatting GUI and related components.
 
+## Version 26-02-27.9
+
+### Added (v26-02-27.9)
+
+- **Preview Frame Buffer**: New frame caching system to enable faster playback in the preview window.
+  - Processed frames are cached in memory to avoid re-processing on loop playback
+  - Supports both main preview and SBS (Side-by-Side) window playback
+  - Buffer automatically clears when processing parameters change (convergence, disparity, gamma, depth settings, border settings, etc.)
+  - Caches pre-scaled display images to avoid repeated resizing operations
+  - LRU eviction when max frames (500) is reached
+  - Implemented in `core/common/preview_buffer.py` and integrated into `dependency/video_previewer.py`
+  - Callback system notifies parent GUI when frames are displayed for SBS window updates
+
 ## Version 26-02-27.8
 
 ### Refactored (v26-02-27.8)
