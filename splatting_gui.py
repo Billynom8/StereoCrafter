@@ -86,7 +86,7 @@ except:
     logger.info("Forward Warp Pytorch is active.")
 from dependency.video_previewer import VideoPreviewer
 
-GUI_VERSION = "26-02-27.9"
+GUI_VERSION = "26-02-28.0"
 
 
 # [REFACTORED] FusionSidecarGenerator class replaced with core import
@@ -108,10 +108,9 @@ from core.splatting.depth_processing import DEPTH_VIS_TV10_BLACK_NORM, DEPTH_VIS
 from core.splatting.config_manager import ConfigManager
 
 # [REFACTORED] Video I/O and Theme functions replaced with core imports
-from core.common import ThemeManager
+from core.ui import ThemeManager, SBSPreviewWindow
 from core.common.video_io import read_video_frames, _NumpyBatch
 from core.common.sidecar_manager import SidecarConfigManager, find_sidecar_file, read_clip_sidecar
-from core.ui.sbs_preview import SBSPreviewWindow
 
 
 class SplatterGUI(ThemedTk):

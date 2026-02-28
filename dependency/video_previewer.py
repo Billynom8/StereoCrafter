@@ -13,7 +13,7 @@ from decord import VideoReader, cpu
 
 # Import the shared preview buffer
 try:
-    from core.common.preview_buffer import PreviewFrameBuffer
+    from core.ui.preview_buffer import PreviewFrameBuffer
 except Exception:
     PreviewFrameBuffer = None
 
