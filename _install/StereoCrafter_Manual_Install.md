@@ -8,66 +8,35 @@ This guide walks you through manually installing the **StereoCrafter** using the
 
 Ensure the following tools are installed and available in your system's PATH:
 
-- [Git](https://git-scm.com/)
-- [CUDA Toolkit 12.8 or 12.9](https://developer.nvidia.com/cuda-toolkit)
+- [Git](https://developer.nvidia.com/cuda-toolkit)
 - [FFMPEG](https://techtactician.com/how-to-install-ffmpeg-and-add-it-to-path-on-windows/)
 
 ---
 
 ## 🚀 Installation Steps
 
-### 1. Verify CUDA Toolkit Installation
-
-Check that `nvcc` is available and the version is 12.8 or 12.9:
+### 1. Install uv Package Manager
 
 ```bash
-
-nvcc --version
-
-```
-
-Look for output like:
-
-```
-
-Cuda compilation tools, release 12.8, V12.8.89
-
-```
-
-> If `nvcc` is not found or the version is incorrect, install the correct version from [NVIDIA's CUDA Toolkit page](https://developer.nvidia.com/cuda-toolkit).
-
-### 2. Install uv Package Manager
-
-```bash
-
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
 ```
 
-
-### 3. Clone the Repository with Submodules & Change Directory Path
+### 2. Clone the Repository with Submodules & Change Directory Path
 
 ```bash
-
 git clone --recursive https://github.com/enoky/StereoCrafter.git
 cd StereoCrafter
-
 ```
 
 > If the folder `StereoCrafter` already exists, delete or rename it before proceeding.
 
-
-
 ---
 
-### 4. Setup and Install
+### 3. Setup and Install
 
 ```bash
-
 uv sync
-
 ```
-
 
 ## 📦 Model Weights Installation
 
@@ -82,15 +51,15 @@ The SVD model is "Gated." You must manually accept the terms of use before you c
 - 3. Click **"Agree and access repository"**.
 
 ### 2. Authenticate your PC
+
 You need a "Read" Token from your [Hugging Face Settings.](https://huggingface.co/settings/tokens) Run this command and paste your token when prompted:
 
 ```bash
-
 uv run hf auth login
-
 ```
 
 ### 3. Download the Models
+
 Run these commands from the `StereoCrafter` root folder. The CLI will automatically create the `weights` folder if it doesn't exist:
 
 ```bash
@@ -102,14 +71,12 @@ uv run hf download tencent/DepthCrafter --local-dir weights/DepthCrafter
 
 # 3. Download StereoCrafter (Open)
 uv run hf download TencentARC/StereoCrafter --local-dir weights/StereoCrafter
-
 ```
 
 **Note:** Total download size is approximately 22GB. Ensure you have enough disk space.
 Your downloaded weights should contain files matching the visual hiearchy below.
 
 ```text
-
 ..\Stereocrafter\weights\
    │ 
    ├───DepthCrafter/
@@ -144,7 +111,6 @@ Your downloaded weights should contain files matching the visual hiearchy below.
    └───StereoCrafter/                        
            config.json                                  
            diffusion_pytorch_model.safetensors         
-
 ```
 
 ## ✅ Final Notes
@@ -152,4 +118,3 @@ Your downloaded weights should contain files matching the visual hiearchy below.
 - If any step fails, check your environment variables and permissions.
 - Refer to `install_log.txt` (if generated during script-based install) for troubleshooting.
 - CUDA support is critical for GPU acceleration. Ensure your drivers and toolkit are correctly installed.
-
