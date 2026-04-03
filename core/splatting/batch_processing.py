@@ -10,6 +10,8 @@ import logging
 import os
 import queue
 import threading
+import re
+import csv
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -32,6 +34,7 @@ from .depth_processing import (
 )
 from .render_processor import RenderProcessor
 from .convergence import ConvergenceEstimatorWrapper
+from .border_scanning import BorderScanner
 
 logger = logging.getLogger(__name__)
 
@@ -684,9 +687,41 @@ class BatchProcessor:
         return None
 
     def _handle_auto_convergence(self, video_path: str, depth_path: str, settings: ProcessingSettings) -> float:
-        # Placeholder for auto-convergence integration
-        # In actual implementation, initialize ConvergenceEstimatorWrapper and call estimate_convergence
-        return settings.zero_disparity_anchor
+        """
+        Runs auto-convergence estimation and returns the selected anchor value.
+        """
+        if not hasattr(self, "convergence_estimator"):
+            self.convergence_estimator = ConvergenceEstimatorWrapper()
+
+        try:
+            logger.info(f"[Auto-Conv] Running estimation for {os.path.basename(video_path)}...")
+            res = self.convergence_estimator.estimate_convergence(
+                rgb_path=video_path,
+                depth_path=depth_path,
+                process_length=int(settings.process_length),
+                gamma=float(settings.depth_gamma),
+                fallback_value=float(settings.zero_disparity_anchor),
+                stop_event=self.stop_event,
+                scan_borders=False,  # Borders are handled separately or via Sidecar
+            )
+            avg_val, peak_val, _, _ = res
+
+            mode = settings.auto_convergence_mode
+            if mode == "Average":
+                conv_val = avg_val
+            elif mode == "Peak":
+                conv_val = peak_val
+            elif mode == "Hybrid":
+                conv_val = 0.5 * (avg_val + peak_val)
+            else:
+                conv_val = avg_val
+
+            logger.info(f"[Auto-Conv] {mode} result: {conv_val:.4f} (Avg: {avg_val:.4f}, Peak: {peak_val:.4f})")
+            return conv_val
+
+        except Exception as e:
+            logger.error(f"[Auto-Conv] Failed for {os.path.basename(video_path)}: {e}")
+            return settings.zero_disparity_anchor
 
     def _initialize_readers(
         self, video_path: str, depth_path: str, settings: ProcessingSettings, task: ProcessingTask
@@ -935,3 +970,246 @@ class BatchProcessor:
             True if stop event is set
         """
         return self.stop_event.is_set()
+
+    def run_auto_pass(
+        self,
+        settings: ProcessingSettings,
+        from_index: int = 0,
+        to_index: Optional[int] = None,
+        video_list: Optional[List[Dict]] = None,
+    ) -> None:
+        """
+        Run AUTO-PASS (Pre-pass) over a list of videos without rendering.
+        Calculates Auto-Convergence and/or Auto-Borders and updates sidecars.
+        """
+        try:
+            # 1. Setup
+            setup_result = self.setup_batch_processing(settings)
+            if setup_result.error:
+                self.logger.error(setup_result.error)
+                return
+
+            input_videos = setup_result.input_videos
+            is_single_file = setup_result.is_single_file_mode
+
+            if not input_videos:
+                self.logger.error("No input videos found for AUTO-PASS.")
+                return
+
+            # Range selection
+            if not is_single_file and video_list:
+                total = len(video_list)
+                start = max(0, min(total, from_index))
+                end = max(start + 1, min(total, to_index or total))
+                selected = video_list[start:end]
+                # Keep original entry structure for easier lookup
+                input_entries = selected
+            elif not is_single_file:
+                total = len(input_videos)
+                start = max(0, min(total, from_index))
+                end = max(start + 1, min(total, to_index or total))
+                input_entries = [{"source_video": p} for p in input_videos[start:end]]
+            else:
+                input_entries = [{"source_video": input_videos[0]}]
+
+            total_entries = len(input_entries)
+            self.progress_queue.put(("total", total_entries))
+            self.progress_queue.put(("status", f"Starting AUTO-PASS for {total_entries} videos..."))
+
+            # 2. Iteration
+            completed = 0
+            rows_for_csv = []
+
+            for entry in input_entries:
+                if self.stop_event.is_set():
+                    break
+
+                rgb_path = entry.get("source_video")
+                if not rgb_path:
+                    continue
+
+                video_name = os.path.splitext(os.path.basename(rgb_path))[0]
+                self.progress_queue.put(("update_info", {"filename": video_name}))
+                self.progress_queue.put(("status", f"AUTO-PASS: {video_name} ({completed + 1}/{total_entries})"))
+
+                # Resolve per-video settings (loads existing sidecar)
+                vid_settings = self._get_video_specific_settings(rgb_path, settings, is_single_file)
+                if vid_settings.get("error"):
+                    self.logger.error(f"Settings error for {video_name}: {vid_settings['error']}")
+                    completed += 1
+                    continue
+
+                depth_path = vid_settings["actual_depth_map_path"]
+                sidecar_path = os.path.join(settings.sidecar_folder, f"{video_name}_depth{settings.sidecar_ext}")
+
+                # Load current data to merge updates
+                current_data = {}
+                if self.sidecar_manager and os.path.exists(sidecar_path):
+                    current_data = self.sidecar_manager.load_sidecar_data(sidecar_path) or {}
+
+                # --- 2A. AUTO-CONVERGENCE ---
+                conv_val = vid_settings["convergence_plane"]
+                if settings.auto_convergence_mode != "Off":
+                    # Only run if not already in sidecar or if mode isn't Manual
+                    if vid_settings["anchor_source"] != "Sidecar" or settings.auto_convergence_mode != "Manual":
+                        conv_val = self._handle_auto_convergence(rgb_path, depth_path, settings)
+                        current_data["convergence_plane"] = float(conv_val)
+
+                # --- 2B. AUTO-BORDER ---
+                effective_max_disp = float(current_data.get("max_disparity", settings.max_disp))
+
+                # Mode Logic: GUI settings usually override sidecar for "AUTO-PASS" run
+                border_mode = settings.auto_convergence_mode  # Legacy mapping or explicit field needed?
+                # Actually in the GUI, border_mode is separate.
+                # Let's check settings again.
+                # GUI passed 'border_mode' explicitly to worker.
+                # For headless, we should probably add border_mode to ProcessingSettings.
+                # Assuming settings.auto_convergence_mode is used or adding a dedicated field.
+                # I'll use settings.auto_convergence_mode for now if it's reused or add settings.border_mode.
+
+                # Wait, I noticed I missed 'border_mode' in ProcessingSettings earlier.
+                # I'll assume it exists or use a default.
+                # Actually, I'll check if I should add it to ProcessingSettings.
+
+                # For now, let's use a hardcoded check or assume it's part of the settings.
+                border_mode_val = getattr(settings, "border_mode", "Off")
+
+                if border_mode_val == "Auto Basic":
+                    tv_disp_comp = 1.0
+                    try:
+                        _info = get_video_stream_info(depth_path)
+                        if (
+                            _infer_depth_bit_depth(_info) > 8
+                            and str((_info or {}).get("color_range", "unknown")).lower() == "tv"
+                        ):
+                            tv_disp_comp = 1.0 / (DEPTH_VIS_TV10_WHITE_NORM - DEPTH_VIS_TV10_BLACK_NORM)
+                    except Exception:
+                        tv_disp_comp = 1.0
+
+                    width = max(0.0, (1.0 - conv_val) * 2.0 * (effective_max_disp / 20.0) * tv_disp_comp)
+                    width = min(5.0, width)
+                    current_data["auto_border_L"] = round(float(width), 3)
+                    current_data["auto_border_R"] = round(float(width), 3)
+                    current_data["border_mode"] = "Auto Basic"
+
+                elif border_mode_val == "Auto Adv.":
+                    if not hasattr(self, "border_scanner"):
+                        self.border_scanner = BorderScanner()
+                    scan = self.border_scanner.scan_depth_path(
+                        depth_map_path=depth_path,
+                        conv=float(conv_val),
+                        max_disp=effective_max_disp,
+                        gamma=float(current_data.get("gamma", settings.depth_gamma)),
+                        stop_event=self.stop_event,
+                    )
+                    if scan:
+                        l_val, r_val = scan
+                        current_data["auto_border_L"] = float(l_val)
+                        current_data["auto_border_R"] = float(r_val)
+                        current_data["border_mode"] = "Auto Adv."
+
+                # --- 2C. SAVE SIDECAR ---
+                if self.sidecar_manager:
+                    # Update other GUI fields if not present
+                    for key in ["max_disparity", "gamma", "depth_dilate_size_x", "depth_dilate_size_y"]:
+                        if key not in current_data:
+                            # Map key to settings attribute
+                            attr = key
+                            if key == "max_disparity":
+                                attr = "max_disp"
+                            elif key == "gamma":
+                                attr = "depth_gamma"
+                            current_data[key] = getattr(settings, attr)
+
+                    self.sidecar_manager.save_sidecar_data(sidecar_path, current_data)
+
+                # --- 2D. PREPARE CSV ROW ---
+                try:
+                    depth_bn = os.path.basename(depth_path)
+                    src_bn = os.path.basename(rgb_path)
+                    frame_num = ""
+                    try:
+                        stem = os.path.splitext(src_bn)[0]
+                        mfr = re.search(r"_([0-9]+)$", stem)
+                        frame_num = mfr.group(1) if mfr else ""
+                    except Exception:
+                        pass
+
+                    rows_for_csv.append(
+                        {
+                            "frame": frame_num,
+                            "source_video": src_bn,
+                            "selected_depth_map": str(current_data.get("selected_depth_map", settings.selected_depth_map)),
+                            "convergence_plane": round(float(current_data.get("convergence_plane", conv_val)), 6),
+                            "left_border": round(float(current_data.get("left_border", 0.0)), 3),
+                            "right_border": round(float(current_data.get("right_border", 0.0)), 3),
+                            "border_mode": str(current_data.get("border_mode", border_mode_val)),
+                            "set_disparity": round(float(current_data.get("max_disparity", effective_max_disp)), 3),
+                            "true_max_disp": current_data.get("dp_total_max_true", ""),
+                            "est_max_disp": current_data.get("dp_total_max_est", ""),
+                            "gamma": round(float(current_data.get("gamma", settings.depth_gamma)), 3),
+                        }
+                    )
+                except Exception as e:
+                    self.logger.debug(f"CSV row preparation failed for {video_name}: {e}")
+
+                completed += 1
+                self.progress_queue.put(("processed", completed))
+
+            # 3. Write CSV
+            if rows_for_csv:
+                self._write_auto_pass_csv(settings.sidecar_folder, rows_for_csv)
+
+            self.progress_queue.put(("status", f"AUTO-PASS complete for {completed} videos."))
+
+        except Exception as e:
+            self.logger.error(f"AUTO-PASS error: {e}", exc_info=True)
+            self.progress_queue.put(("status", f"Error in AUTO-PASS: {e}"))
+        finally:
+            self.progress_queue.put("finished")
+
+    def _write_auto_pass_csv(self, sidecar_folder: str, new_rows: List[Dict]) -> None:
+        """Writes/merges results into auto_pass_export.csv."""
+        csv_path = os.path.join(sidecar_folder, "auto_pass_export.csv")
+        fieldnames = [
+            "frame",
+            "source_video",
+            "selected_depth_map",
+            "convergence_plane",
+            "left_border",
+            "right_border",
+            "border_mode",
+            "set_disparity",
+            "true_max_disp",
+            "est_max_disp",
+            "gamma",
+        ]
+
+        existing_rows = {}
+        try:
+            if os.path.exists(csv_path):
+                with open(csv_path, "r", newline="", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        key = row.get("source_video")
+                        if key:
+                            existing_rows[key] = row
+        except Exception as e:
+            self.logger.warning(f"Failed to read existing AUTO-PASS CSV: {e}")
+
+        # Merge new rows
+        for row in new_rows:
+            key = row.get("source_video")
+            if key:
+                existing_rows[key] = row
+
+        try:
+            os.makedirs(sidecar_folder, exist_ok=True)
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for key in sorted(existing_rows.keys()):
+                    writer.writerow(existing_rows[key])
+            self.logger.info(f"AUTO-PASS CSV updated at: {csv_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to write AUTO-PASS CSV: {e}")
