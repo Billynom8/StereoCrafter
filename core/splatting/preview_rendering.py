@@ -25,6 +25,7 @@ from core.common.image_processing import apply_dubois_anaglyph, apply_optimized_
 from core.common.gpu_utils import release_cuda_memory
 
 from .forward_warp import ForwardWarpStereo
+from core.common.mesh_warp import run_fusion_stereo
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,10 @@ class PreviewRenderer:
         "anaglyph_dubois": ["Dubois Anaglyph"],
         "anaglyph_optimized": ["Optimized Anaglyph"],
         "wigglegram": ["Wigglegram"],
+        "sbs": ["Side-by-Side"],
+        "mesh": ["Mesh Warp"],
+        "mesh_sbs": ["Side-by-Side (Mesh)"],
+        "mesh_stack": ["SBS + Mesh"],
     }
 
     def __init__(self, cuda_available: bool = True):
@@ -243,6 +248,9 @@ class PreviewRenderer:
         if depth_processed is None:
             return None
 
+        # Keep a clean copy of the source before any Splatting borders are applied
+        source_resized_original = source_resized.clone()
+
         # Perform splatting
         stereo_projector = ForwardWarpStereo(occlu_map=True).cuda()
 
@@ -279,15 +287,74 @@ class PreviewRenderer:
             if r_px > 0:
                 right_eye[:, :, :, -r_px:] = 0.0
 
+        # Handle Mesh-based modes (Right Eye or SBS)
+        if "Mesh" in preview_mode or "mesh" in preview_mode.lower():
+            # CRITICAL: We want the original UN-BORDERED image for the mesh engine
+            # because the mesh engine handles its own geometry.
+            clean_src_np = (source_resized_original.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            depth_np = depth_processed
+
+            l_mesh, r_mesh = run_fusion_stereo(
+                image=clean_src_np,
+                depth=depth_np,
+                disparity=max_disp,
+                convergence=convergence,
+                view_bias=float(settings.get("view_bias", 0.0)),
+                dolly_zoom=float(settings.get("mesh_dolly", 0.0)),
+                extrusion_scale=float(settings.get("mesh_extrusion", 0.5)),
+                density_x=int(W_target * float(settings.get("mesh_density", 0.5))),
+                density_y=int(H_target * float(settings.get("mesh_density", 0.5))),
+            )
+
+            if settings and settings.get("cross_view", False):
+                l_mesh, r_mesh = r_mesh, l_mesh
+
+            if preview_mode == "Side-by-Side (Mesh)" or preview_mode == "Mesh Warp":
+                final_np = np.concatenate([l_mesh, r_mesh], axis=1)
+                return Image.fromarray(final_np)
+            elif preview_mode == "SBS + Mesh":
+                # Create SBS-Splat (top)
+                l_splat = (source_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                r_splat = (right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+
+                # Check for cross view here too
+                if settings and settings.get("cross_view", False):
+                    l_splat, r_splat = r_splat, l_splat
+
+                sbs_splat = np.concatenate([l_splat, r_splat], axis=1)
+
+                # Create SBS-Mesh (bottom)
+                sbs_mesh = np.concatenate([l_mesh, r_mesh], axis=1)
+
+                # Stack them vertically
+                # Ensure width matches (sometimes mesh might resize differently)
+                if sbs_splat.shape[1] != sbs_mesh.shape[1]:
+                    sbs_mesh = cv2.resize(sbs_mesh, (sbs_splat.shape[1], sbs_mesh.shape[0]))
+
+                stack = np.concatenate([sbs_splat, sbs_mesh], axis=0)
+                return Image.fromarray(stack)
+            else:
+                # Just the Right Eye Mesh result
+                return Image.fromarray(r_mesh)
+
         # Render based on mode
-        final_tensor = self._render_by_mode(source_resized, right_eye, depth_processed, occlusion_mask, preview_mode)
+        final_tensor = self._render_by_mode(
+            source_resized, right_eye, depth_processed, occlusion_mask, preview_mode, settings
+        )
 
         # Handle wigglegram special case
-        if preview_mode == "Wigglegram" and wigglegram_callback:
-            wigglegram_callback(source_resized.cpu(), right_eye.cpu())
-            del stereo_projector, disp_map, right_eye_raw, occlusion_mask
-            release_cuda_memory()
-            return None
+        if preview_mode == "Wigglegram":
+            # Swap wiggle toggle if cross view is enabled? (Essentially swaps eyes)
+            wiggle_state = settings.get("wiggle_toggle", True)
+            if settings and settings.get("cross_view", False):
+                wiggle_state = not wiggle_state
+
+            if wiggle_state:
+                return Image.fromarray(
+                    (source_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                )
+            else:
+                return Image.fromarray((right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8))
 
         # Convert to PIL Image
         if final_tensor is not None:
@@ -416,22 +483,23 @@ class PreviewRenderer:
         return depth_normalized
 
     def _render_by_mode(
-        self, left_eye: torch.Tensor, right_eye: torch.Tensor, depth: np.ndarray, occlusion: torch.Tensor, mode: str
+        self,
+        left_eye: torch.Tensor,
+        right_eye: torch.Tensor,
+        depth: np.ndarray,
+        occlusion: torch.Tensor,
+        mode: str,
+        settings: Dict = None,
     ) -> Optional[torch.Tensor]:
-        """Render output based on preview mode.
-
-        Args:
-            left_eye: Left eye tensor [1, 3, H, W]
-            right_eye: Right eye tensor [1, 3, H, W]
-            depth: Normalized depth array [H, W]
-            occlusion: Occlusion mask tensor [1, 1, H, W]
-            mode: Preview mode string
-
-        Returns:
-            Final output tensor [1, 3, H, W], or None
-        """
+        """Render output based on preview mode."""
         if mode in ["Splat Result", "Splat Result(Low)"]:
             return right_eye.cpu()
+
+        elif mode == "Side-by-Side":
+            l_np = (left_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            r_np = (right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            sbs = np.concatenate([l_np, r_np], axis=1)
+            return torch.from_numpy(sbs).permute(2, 0, 1).unsqueeze(0).float() / 255.0
 
         elif mode in ["Occlusion Mask", "Occlusion Mask(Low)"]:
             return occlusion.repeat(1, 3, 1, 1).cpu()

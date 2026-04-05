@@ -268,7 +268,10 @@ class FusionStereoReplicator:
         # Calculate the absolute Z bounds of the extruded geometry (0.0 to 1.0 depth)
         # for linear convergence slider mapping.
         z_bg = 0.0  # Absolute depth 0.0
-        z_fg = abs_extrusion_point[2] * extrusion_scale  # Absolute depth 1.0
+
+        # SAFETY: Cap extrusion so it never hits the camera lens (ZeroDivisionError)
+        safe_scale = min(extrusion_scale, 0.999)
+        z_fg = abs_extrusion_point[2] * safe_scale  # Absolute depth 1.0
 
         # 3. Setup Uniforms
         self.prog["img_width"].value = float(self.width)

@@ -21,6 +21,7 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "openexr>=3.4.4",
     "pyperclip>=1.11.0",
+    "pyside6>=6.11.0",
     "safetensors",
     "tkinterdnd2>=0.4.3",
     "torch>=2.9.1",
