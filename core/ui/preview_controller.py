@@ -10,6 +10,7 @@ from core.common.video_io import read_video_frames, get_video_stream_info
 from core.ui.preview_buffer import PreviewFrameBuffer
 from core.splatting.preview_rendering import PreviewRenderer
 from core.common.sidecar_manager import SidecarConfigManager
+from core.splatting.border_scanning import BorderScanner
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,9 @@ class PreviewController:
         # Sidecar Configuration
         self._sidecar_folder: str = "./Sidecar"
         self._sidecar_extension: str = ".json"
+
+        # Border Scanner
+        self.border_scanner = BorderScanner()
 
     # =========================================================================
     # VIDEO LOADING & MANAGEMENT
@@ -489,6 +493,77 @@ class PreviewController:
                 params[gui_key] = sidecar_data[sidecar_key]
 
         return params
+
+    # =========================================================================
+    # BORDER SCANNING
+    # =========================================================================
+
+    def scan_borders_for_current_clip(
+        self, conv: float, max_disp: float, gamma: float = 1.0, status_callback=None
+    ) -> Optional[Tuple[float, float]]:
+        """Scan current depth map for border requirements.
+
+        Thread-safe wrapper around BorderScanner.scan_current_clip.
+
+        Args:
+            conv: Convergence plane value (0.0 to 1.0)
+            max_disp: Maximum disparity in pixels
+            gamma: Gamma correction value (default: 1.0)
+            status_callback: Optional callback for status updates
+
+        Returns:
+            Tuple of (left_border_pct, right_border_pct) if successful, None otherwise
+        """
+        entry = self.get_current_video_entry()
+        if not entry:
+            logger.warning("No current video entry for border scanning")
+            return None
+
+        return self.border_scanner.scan_current_clip(
+            depth_path=entry["depth_map"],
+            conv=conv,
+            max_disp=max_disp,
+            gamma=gamma,
+            stop_event=None,  # Could be enhanced with cancellation support
+            status_callback=status_callback,
+            flip_horizontal=False,  # Assuming no horizontal flip for now
+        )
+
+    def scan_borders_for_depth_path(
+        self, depth_map_path: str, conv: float, max_disp: float, gamma: float = 1.0
+    ) -> Optional[Tuple[float, float]]:
+        """Thread-safe helper for scanning a depth-map video for border requirements.
+
+        Args:
+            depth_map_path: Absolute path to depth map video file
+            conv: Convergence plane value (0.0 to 1.0)
+            max_disp: Maximum disparity in pixels
+            gamma: Gamma correction value (default: 1.0)
+
+        Returns:
+            Tuple of (left_border_pct, right_border_pct) if successful, None otherwise
+        """
+        return self.border_scanner.scan_depth_path(
+            depth_map_path=depth_map_path,
+            conv=conv,
+            max_disp=max_disp,
+            gamma=gamma,
+            stop_event=None,
+            flip_horizontal=False,
+        )
+
+    @staticmethod
+    def sync_sliders_to_auto_borders(left_border: float, right_border: float) -> Tuple[float, float]:
+        """Convert left/right borders to width/bias values.
+
+        Args:
+            left_border: Left border percentage
+            right_border: Right border percentage
+
+        Returns:
+            Tuple of (width, bias) values for sliders
+        """
+        return BorderScanner.sync_sliders_to_auto_borders(left_border, right_border)
 
     # =========================================================================
     # CLEANUP

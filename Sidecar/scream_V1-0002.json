@@ -5,9 +5,9 @@
     "input_bias": 0.0,
     "depth_dilate_size_x": 0,
     "depth_dilate_size_y": 0.0,
-    "depth_blur_size_x": 0,
+    "depth_blur_size_x": 99,
     "depth_blur_size_y": 0,
-    "selected_depth_map": "Splat Result",
-    "left_border": 5,
+    "selected_depth_map": "Side-by-Side",
+    "left_border": 98,
     "border_mode": "Off"
 }

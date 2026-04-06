@@ -28,13 +28,13 @@ def apply_mask_dilation(mask: torch.Tensor, kernel_size: int, use_gpu: bool = Tr
     """
     if kernel_size <= 0:
         return mask
-    
+
     # Ensure 4D
     added_batch = False
     if mask.dim() == 3:
         mask = mask.unsqueeze(0)
         added_batch = True
-        
+
     kernel_val = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
 
     if use_gpu and mask.is_cuda:
@@ -49,9 +49,9 @@ def apply_mask_dilation(mask: torch.Tensor, kernel_size: int, use_gpu: bool = Tr
             frame_np = (mask[t].squeeze(0).cpu().numpy() * 255).astype(np.uint8)
             dilated_np = cv2.dilate(frame_np, kernel, iterations=1)
             dilated_tensor = torch.from_numpy(dilated_np).float() / 255.0
-            processed_frames.append(dilated_tensor.unsqueeze(0)) # Add C dimension back
+            processed_frames.append(dilated_tensor.unsqueeze(0))  # Add C dimension back
         result = torch.stack(processed_frames).to(mask.device)
-        
+
     if added_batch:
         result = result.squeeze(0)
     return result
@@ -70,13 +70,13 @@ def apply_gaussian_blur(mask: torch.Tensor, kernel_size: int, use_gpu: bool = Tr
     """
     if kernel_size <= 0:
         return mask
-        
+
     # Ensure 4D
     added_batch = False
     if mask.dim() == 3:
         mask = mask.unsqueeze(0)
         added_batch = True
-        
+
     kernel_val = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
 
     if use_gpu and mask.is_cuda:
@@ -98,7 +98,7 @@ def apply_gaussian_blur(mask: torch.Tensor, kernel_size: int, use_gpu: bool = Tr
             blurred_tensor = torch.from_numpy(blurred_np).float() / 255.0
             processed_frames.append(blurred_tensor.unsqueeze(0))
         result = torch.stack(processed_frames).to(mask.device)
-        
+
     if added_batch:
         result = result.squeeze(0)
     return result
@@ -129,11 +129,11 @@ def apply_shadow_blur(
     """
     if shift_per_step <= 0:
         return mask
-        
+
     # Prevent division by zero if opacity decay is zero
     if opacity_decay_per_step <= 1e-6:
         return mask
-        
+
     num_steps = int((start_opacity - min_opacity) / opacity_decay_per_step) + 1
     if num_steps <= 0:
         return mask
@@ -173,7 +173,7 @@ def apply_shadow_blur(
                     canvas_np = np.maximum(canvas_np, shifted_stamp * current_opacity)
             processed_frames.append(torch.from_numpy(canvas_np).unsqueeze(0))
         result = torch.stack(processed_frames).to(mask.device)
-        
+
     if added_batch:
         result = result.squeeze(0)
     return result
@@ -191,18 +191,26 @@ def apply_dubois_anaglyph_torch(left: torch.Tensor, right: torch.Tensor) -> torc
     """
     # Dubois Red-Cyan matrices
     # Left contributions
-    l_mat = torch.tensor([
-        [ 0.456,  0.500,  0.176], # Red
-        [-0.040, -0.038, -0.016], # Green
-        [-0.015, -0.021, -0.005]  # Blue
-    ], device=left.device, dtype=left.dtype)
+    l_mat = torch.tensor(
+        [
+            [0.456, 0.500, 0.176],  # Red
+            [-0.040, -0.038, -0.016],  # Green
+            [-0.015, -0.021, -0.005],  # Blue
+        ],
+        device=left.device,
+        dtype=left.dtype,
+    )
 
     # Right contributions
-    r_mat = torch.tensor([
-        [-0.043, -0.088, -0.002], # Red
-        [ 0.378,  0.734, -0.018], # Green
-        [-0.072, -0.113,  1.226]  # Blue
-    ], device=right.device, dtype=right.dtype)
+    r_mat = torch.tensor(
+        [
+            [-0.043, -0.088, -0.002],  # Red
+            [0.378, 0.734, -0.018],  # Green
+            [-0.072, -0.113, 1.226],  # Blue
+        ],
+        device=right.device,
+        dtype=right.dtype,
+    )
 
     # Reshape for matrix multiplication: [B, 3, H, W] -> [B, H*W, 3]
     B, C, H, W = left.shape
@@ -211,7 +219,7 @@ def apply_dubois_anaglyph_torch(left: torch.Tensor, right: torch.Tensor) -> torc
 
     # Apply matrices
     res_flat = torch.matmul(l_flat, l_mat.t()) + torch.matmul(r_flat, r_mat.t())
-    
+
     # Reshape back and clamp
     res = res_flat.reshape(B, H, W, 3).permute(0, 3, 1, 2)
     return torch.clamp(res, 0.0, 1.0)
@@ -230,7 +238,7 @@ def apply_optimized_anaglyph_torch(left: torch.Tensor, right: torch.Tensor) -> t
     # Red channel from left (Green/Blue weighted mix for luminance)
     # Optimized weight for Red channel: 0.0*R + 0.7*G + 0.3*B from left
     l_red = left[:, 1:2, :, :] * 0.7 + left[:, 2:3, :, :] * 0.3
-    
+
     # Green and Blue channels from right
     res = torch.cat([l_red, right[:, 1:2, :, :], right[:, 2:3, :, :]], dim=1)
     return torch.clamp(res, 0.0, 1.0)
@@ -254,8 +262,10 @@ def apply_borders_to_frames(
         left_px = int(round(W * left_border_pct / 100.0))
         right_px = int(round(W * right_border_pct / 100.0))
 
-    if left_px < 0: left_px = 0
-    if right_px < 0: right_px = 0
+    if left_px < 0:
+        left_px = 0
+    if right_px < 0:
+        right_px = 0
     if left_px >= W or right_px >= W:
         return original_left, blended_right
 
@@ -302,7 +312,9 @@ def apply_color_transfer(source_frame: torch.Tensor, target_frame: torch.Tensor)
 
         target_lab_float = target_lab.astype(np.float32)
         for i in range(3):
-            target_lab_float[:, :, i] = (target_lab_float[:, :, i] - tgt_mean[i]) / tgt_std[i] * src_std[i] + src_mean[i]
+            target_lab_float[:, :, i] = (target_lab_float[:, :, i] - tgt_mean[i]) / tgt_std[i] * src_std[i] + src_mean[
+                i
+            ]
 
         adjusted_lab_uint8 = np.clip(target_lab_float, 0, 255).astype(np.uint8)
         adjusted_rgb = cv2.cvtColor(adjusted_lab_uint8, cv2.COLOR_LAB2RGB)
@@ -316,8 +328,12 @@ def apply_dubois_anaglyph(left_rgb_np: np.ndarray, right_rgb_np: np.ndarray) -> 
     """Dubois anaglyph (legacy NumPy version)."""
     left_float = left_rgb_np.astype(np.float32) / 255.0
     right_float = right_rgb_np.astype(np.float32) / 255.0
-    left_matrix = np.array([[0.456, 0.500, 0.176], [-0.040, -0.038, -0.016], [-0.015, -0.021, -0.005]], dtype=np.float32)
-    right_matrix = np.array([[-0.043, -0.088, -0.002], [0.378, 0.734, -0.018], [-0.072, -0.113, 1.226]], dtype=np.float32)
+    left_matrix = np.array(
+        [[0.456, 0.500, 0.176], [-0.040, -0.038, -0.016], [-0.015, -0.021, -0.005]], dtype=np.float32
+    )
+    right_matrix = np.array(
+        [[-0.043, -0.088, -0.002], [0.378, 0.734, -0.018], [-0.072, -0.113, 1.226]], dtype=np.float32
+    )
     H, W = left_float.shape[:2]
     left_flat = left_float.reshape(-1, 3)
     right_flat = right_float.reshape(-1, 3)
@@ -338,19 +354,32 @@ def apply_optimized_anaglyph(left_rgb_np: np.ndarray, right_rgb_np: np.ndarray) 
     return (anaglyph_flat.reshape(H, W, 3) * 255.0).astype(np.uint8)
 
 
-def custom_dilate(tensor: torch.Tensor, kernel_size_x: float, kernel_size_y: float, use_gpu: bool = False, max_content_value: float = 1.0) -> torch.Tensor:
+def custom_dilate(
+    tensor: torch.Tensor,
+    kernel_size_x: float,
+    kernel_size_y: float,
+    use_gpu: bool = False,
+    max_content_value: float = 1.0,
+) -> torch.Tensor:
     """Applies 16-bit fractional dilation/erosion."""
     kx_raw, ky_raw = float(kernel_size_x), float(kernel_size_y)
-    if abs(kx_raw) <= 1e-5 and abs(ky_raw) <= 1e-5: return tensor
+    if abs(kx_raw) <= 1e-5 and abs(ky_raw) <= 1e-5:
+        return tensor
     if (kx_raw > 0 and ky_raw < 0) or (kx_raw < 0 and ky_raw > 0):
-        return custom_dilate(custom_dilate(tensor, kx_raw, 0, use_gpu, max_content_value), 0, ky_raw, use_gpu, max_content_value)
+        return custom_dilate(
+            custom_dilate(tensor, kx_raw, 0, use_gpu, max_content_value), 0, ky_raw, use_gpu, max_content_value
+        )
     is_erosion = kx_raw < 0 or ky_raw < 0
     kx_abs, ky_abs = abs(kx_raw), abs(ky_raw)
+
     def get_params(v):
-        if v <= 1e-5: return 1, 1, 0.0
-        if v < 3.0: return 1, 3, (v / 3.0)
+        if v <= 1e-5:
+            return 1, 1, 0.0
+        if v < 3.0:
+            return 1, 3, (v / 3.0)
         base = 3 + 2 * int((v - 3) // 2)
         return base, base + 2, (v - base) / 2.0
+
     kx_low, kx_high, tx = get_params(kx_abs)
     ky_low, ky_high, ty = get_params(ky_abs)
     tensor_cpu = tensor.to("cpu")
@@ -360,14 +389,20 @@ def custom_dilate(tensor: torch.Tensor, kernel_size_x: float, kernel_size_y: flo
         frame_2d = frame[0] if frame.shape[0] == 1 else np.transpose(frame, (1, 2, 0))
         eff_max = max(max_content_value, 1e-5)
         src_img = np.ascontiguousarray(np.clip((frame_2d / eff_max) * 65535, 0, 65535).astype(np.uint16))
+
         def do_op(kw, kh, img):
-            if kw <= 1 and kh <= 1: return img.astype(np.float32)
+            if kw <= 1 and kh <= 1:
+                return img.astype(np.float32)
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, kh))
             op = cv2.erode if is_erosion else cv2.dilate
             return op(img, kernel, iterations=1).astype(np.float32)
-        if tx <= 1e-4 and ty <= 1e-4: res = do_op(kx_low, ky_low, src_img)
-        elif tx > 1e-4 and ty <= 1e-4: res = (1.0 - tx) * do_op(kx_low, ky_low, src_img) + tx * do_op(kx_high, ky_low, src_img)
-        elif tx <= 1e-4 and ty > 1e-4: res = (1.0 - ty) * do_op(kx_low, ky_low, src_img) + ty * do_op(kx_low, ky_high, src_img)
+
+        if tx <= 1e-4 and ty <= 1e-4:
+            res = do_op(kx_low, ky_low, src_img)
+        elif tx > 1e-4 and ty <= 1e-4:
+            res = (1.0 - tx) * do_op(kx_low, ky_low, src_img) + tx * do_op(kx_high, ky_low, src_img)
+        elif tx <= 1e-4 and ty > 1e-4:
+            res = (1.0 - ty) * do_op(kx_low, ky_low, src_img) + ty * do_op(kx_low, ky_high, src_img)
         else:
             r11, r12 = do_op(kx_low, ky_low, src_img), do_op(kx_low, ky_high, src_img)
             r21, r22 = do_op(kx_high, ky_low, src_img), do_op(kx_high, ky_high, src_img)
@@ -376,26 +411,37 @@ def custom_dilate(tensor: torch.Tensor, kernel_size_x: float, kernel_size_y: flo
     return torch.stack(processed).to(tensor.device)
 
 
-def custom_dilate_left(tensor: torch.Tensor, kernel_size: float, use_gpu: bool = False, max_content_value: float = 1.0) -> torch.Tensor:
+def custom_dilate_left(
+    tensor: torch.Tensor, kernel_size: float, use_gpu: bool = False, max_content_value: float = 1.0
+) -> torch.Tensor:
     """Directional 16-bit fractional dilation to the LEFT."""
     k_raw = float(kernel_size)
-    if abs(k_raw) <= 1e-5: return tensor
+    if abs(k_raw) <= 1e-5:
+        return tensor
     is_erosion, k_raw = k_raw < 0, abs(k_raw)
+
     def get_params(v):
-        if v <= 1e-5: return 1, 1, 0.0
-        if v < 3.0: return 1, 3, (v / 3.0)
+        if v <= 1e-5:
+            return 1, 1, 0.0
+        if v < 3.0:
+            return 1, 3, (v / 3.0)
         base = 3 + 2 * int((v - 3) // 2)
         return base, base + 2, (v - base) / 2.0
+
     kw_low, kw_high, t = get_params(k_raw)
     k_low, k_high = int(kw_low // 2), int(kw_high // 2)
-    if k_low <= 0 and k_high <= 0: return tensor
+    if k_low <= 0 and k_high <= 0:
+        return tensor
     eff_max = max(float(max_content_value), 1e-5)
     tensor_cpu = tensor.to("cpu")
+
     def do_op(k_int, src):
-        if k_int <= 0: return src.astype(np.float32)
+        if k_int <= 0:
+            return src.astype(np.float32)
         kernel = np.ones((1, k_int + 1), dtype=np.uint8)
         op = cv2.erode if is_erosion else cv2.dilate
         return op(src, kernel, anchor=(0, 0), iterations=1).astype(np.float32)
+
     processed = []
     for idx in range(tensor_cpu.shape[0]):
         f = tensor_cpu[idx].numpy()
@@ -407,25 +453,40 @@ def custom_dilate_left(tensor: torch.Tensor, kernel_size: float, use_gpu: bool =
     return torch.from_numpy(np.stack(processed, axis=0)).to(tensor.device)
 
 
-def custom_blur_left_masked(tensor_before: torch.Tensor, tensor_after: torch.Tensor, kernel_size: int, use_gpu: bool = False, max_content_value: float = 1.0, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+def custom_blur_left_masked(
+    tensor_before: torch.Tensor,
+    tensor_after: torch.Tensor,
+    kernel_size: int,
+    use_gpu: bool = False,
+    max_content_value: float = 1.0,
+    mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
     """Applies Gaussian blur ONLY to pixels that changed."""
     k = int(float(kernel_size))
-    if k <= 0: return tensor_after
-    if k % 2 == 0: k += 1
+    if k <= 0:
+        return tensor_after
+    if k % 2 == 0:
+        k += 1
     k = max(k, 1)
     if mask is None:
         changed = (tensor_after - tensor_before).abs() > 1e-12
     else:
         changed = mask.unsqueeze(1) if mask.ndim == 3 else mask
         changed = (changed > 0.5) if changed.dtype != torch.bool else changed
-    if not bool(changed.any().item()): return tensor_after
-    return torch.where(changed.to(tensor_after.device), custom_blur(tensor_after, k, k, use_gpu, max_content_value), tensor_after)
+    if not bool(changed.any().item()):
+        return tensor_after
+    return torch.where(
+        changed.to(tensor_after.device), custom_blur(tensor_after, k, k, use_gpu, max_content_value), tensor_after
+    )
 
 
-def custom_blur(tensor: torch.Tensor, kernel_size_x: int, kernel_size_y: int, use_gpu: bool = True, max_content_value: float = 1.0) -> torch.Tensor:
+def custom_blur(
+    tensor: torch.Tensor, kernel_size_x: int, kernel_size_y: int, use_gpu: bool = True, max_content_value: float = 1.0
+) -> torch.Tensor:
     """Applies 16-bit Gaussian blur."""
     kx, ky = int(kernel_size_x), int(kernel_size_y)
-    if kx <= 0 and ky <= 0: return tensor
+    if kx <= 0 and ky <= 0:
+        return tensor
     kx, ky = (kx if kx % 2 == 1 else kx + 1), (ky if ky % 2 == 1 else ky + 1)
     tensor_cpu = tensor.to("cpu")
     processed = []
