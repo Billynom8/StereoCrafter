@@ -369,7 +369,7 @@ QCheckBox, QRadioButton { spacing: 5px; }
         </property>
         <property name="icon">
          <iconset>
-          <normaloff>icons/media-player-ui-button-repeat-loop.svg</normaloff>icons/media-player-ui-button-repeat-loop.svg</iconset>
+          <normaloff>core/ui/icons/loop.svg</normaloff>core/ui/icons/loop.svg</iconset>
         </property>
         <property name="checkable">
          <bool>true</bool>

@@ -290,7 +290,7 @@ class Ui_MainWindow(object):
         self.pushButton_settings = QPushButton(self.centralwidget)
         self.pushButton_settings.setObjectName(u"pushButton_settings")
         icon = QIcon()
-        icon.addFile(u"icons/media-player-ui-button-repeat-loop.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        icon.addFile(u"core/ui/icons/loop.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.pushButton_settings.setIcon(icon)
         self.pushButton_settings.setCheckable(True)
         self.pushButton_settings.setChecked(False)

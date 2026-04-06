@@ -5,20 +5,22 @@ import torch
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 from typing import Optional, Tuple
 
+
 class SBSPreviewWindow:
     """
     A standalone Toplevel window for Side-By-Side (SBS) stereo preview.
     Designed to be used by any GUI (Splatting, Merging, etc.) by providing
     Left and Right eye tensors.
     """
+
     def __init__(self, parent, title="SBS Preview", on_close_callback=None):
         self.parent = parent
         self.on_close_callback = on_close_callback
-        
+
         self.window = tk.Toplevel(parent)
         self.window.title(title)
         self.window.configure(bg="black")
-        
+
         # Set a reasonable initial size for 2:1 SBS (e.g., 1280x360)
         try:
             sw = self.window.winfo_screenwidth()
@@ -31,24 +33,24 @@ class SBSPreviewWindow:
             self.window.geometry("1280x360")
 
         self.window.resizable(True, True)
-        
+
         # Use a frame to contain the label
         self.main_frame = tk.Frame(self.window, bg="black")
         self.main_frame.pack(fill="both", expand=True)
-        
+
         self.label = tk.Label(self.main_frame, bg="black")
         self.label.pack(fill="both", expand=True)
-        
+
         self.is_fullscreen = False
         self.is_cross_eye = False
         self.photo = None
-        
+
         # Keybinds - Direct Controls
         self.window.bind("<F11>", lambda e: self.toggle_fullscreen())
         self.window.bind("<Escape>", lambda e: self.toggle_fullscreen(force=False))
         self.window.bind("<x>", lambda e: self.toggle_cross_eye())
         self.window.bind("<X>", lambda e: self.toggle_cross_eye())
-        
+
         # --- NEW: Unified Key Relay ---
         # Instead of a manual list, we intercept ALL key presses
         # and promote them to the root window if they aren't for the SBS window.
@@ -57,7 +59,7 @@ class SBSPreviewWindow:
 
         # Double-click toggles fullscreen on the label
         self.label.bind("<Double-Button-1>", lambda e: self.toggle_fullscreen())
-        
+
         # Close handler
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -65,9 +67,9 @@ class SBSPreviewWindow:
         """Pass all key presses to the parent window for parity with the main GUI."""
         if self._relaying_lock:
             return
-            
+
         ksy = event.keysym.lower()
-        
+
         # 1. Handle SBS-specific shortcuts first
         if ksy == "x":
             self.toggle_cross_eye()
@@ -80,23 +82,23 @@ class SBSPreviewWindow:
                 self.toggle_fullscreen(force=False)
                 return "break"
             # If not fullscreen, relay Escape to let it close dialogs/menus
-            
+
         # 2. Relay EVERYTHING else to the parent's top-level window
         if self.parent:
             root = self.parent.winfo_toplevel()
             # Construct a complete event promotion with correct flag mappings
             kwargs = {
-                'serial': event.serial, 
-                'time': event.time,
-                'x': event.x, 
-                'y': event.y, 
-                'rootx': event.x_root, 
-                'rooty': event.y_root,
-                'state': event.state, 
-                'keycode': event.keycode,
-                'keysym': event.keysym
+                "serial": event.serial,
+                "time": event.time,
+                "x": event.x,
+                "y": event.y,
+                "rootx": event.x_root,
+                "rooty": event.y_root,
+                "state": event.state,
+                "keycode": event.keycode,
+                "keysym": event.keysym,
             }
-            
+
             # Use a guard to prevent the root window from potentially
             # echoing the event back to the focused SBS window (recursion).
             try:
@@ -111,8 +113,8 @@ class SBSPreviewWindow:
                 pass
             finally:
                 self._relaying_lock = False
-            
-        return "break" # Prevent the Toplevel from doing its own handling
+
+        return "break"  # Prevent the Toplevel from doing its own handling
 
     def _on_close(self):
         if self.on_close_callback:
@@ -164,30 +166,31 @@ class SBSPreviewWindow:
         try:
             # Convert tensors to numpy [H, W, C] uint8
             def to_np(t):
-                if t.dim() == 4: t = t.squeeze(0)
+                if t.dim() == 4:
+                    t = t.squeeze(0)
                 return (t.permute(1, 2, 0).detach().cpu().numpy() * 255).astype(np.uint8)
 
             left_np = to_np(left_tensor)
             right_np = to_np(right_tensor)
-            
+
             # Concatenate SBS (handle cross-eye swap)
             if self.is_cross_eye:
                 sbs_np = np.concatenate([right_np, left_np], axis=1)
             else:
                 sbs_np = np.concatenate([left_np, right_np], axis=1)
-                
+
             img = Image.fromarray(sbs_np)
-            
+
             # Apply external overlays (crosshairs, metrics)
             if overlays_callback:
                 draw = ImageDraw.Draw(img)
                 overlays_callback(img, self)
-                
+
             # Resize logic (downscale to fit window/screen)
             w_img, h_img = img.size
             w_win = self.window.winfo_width()
             h_win = self.window.winfo_height()
-            
+
             if w_win <= 1 or h_win <= 1:
                 w_win = self.window.winfo_screenwidth()
                 h_win = self.window.winfo_screenheight()
@@ -204,7 +207,9 @@ class SBSPreviewWindow:
             pass
 
     @staticmethod
-    def draw_bullseye_overlay(draw: ImageDraw.ImageDraw, x_off: int, half_w: int, h_img: int, color: Tuple[int, int, int], multi: bool):
+    def draw_bullseye_overlay(
+        draw: ImageDraw.ImageDraw, x_off: int, half_w: int, h_img: int, color: Tuple[int, int, int], multi: bool
+    ):
         """Standardized bullseye crosshair drawing."""
         cx, cy = x_off + (half_w // 2), h_img // 2
 
@@ -226,18 +231,36 @@ class SBSPreviewWindow:
         outer_len = max(6, int(base * 0.65))
         outer_r, outer_w = max(3, outer_len // 3), 2
 
-        outer = [(cx-dx, cy), (cx+dx, cy), (cx, cy-dy), (cx, cy+dy), (cx-dx, cy-dy), (cx+dx, cy-dy), (cx-dx, cy+dy), (cx+dx, cy+dy)]
+        outer = [
+            (cx - dx, cy),
+            (cx + dx, cy),
+            (cx, cy - dy),
+            (cx, cy + dy),
+            (cx - dx, cy - dy),
+            (cx + dx, cy - dy),
+            (cx - dx, cy + dy),
+            (cx + dx, cy + dy),
+        ]
         for x, y in outer:
             _draw_bullseye(x, y, half_len=outer_len, r=outer_r, line_w=outer_w)
 
         dot_r = 2
         for x, y in outer:
-            for t in (1/3, 2/3):
-                _draw_dot(int(round(cx + (x-cx)*t)), int(round(cy + (y-cy)*t)), dot_r)
+            for t in (1 / 3, 2 / 3):
+                _draw_dot(int(round(cx + (x - cx) * t)), int(round(cy + (y - cy) * t)), dot_r)
 
-        ring = [(cx, cy-dy), (cx+dx, cy-dy), (cx+dx, cy), (cx+dx, cy+dy), (cx, cy+dy), (cx-dx, cy+dy), (cx-dx, cy), (cx-dx, cy-dy)]
+        ring = [
+            (cx, cy - dy),
+            (cx + dx, cy - dy),
+            (cx + dx, cy),
+            (cx + dx, cy + dy),
+            (cx, cy + dy),
+            (cx - dx, cy + dy),
+            (cx - dx, cy),
+            (cx - dx, cy - dy),
+        ]
         for i in range(len(ring)):
             x0, y0 = ring[i]
-            x1, y1 = ring[(i+1)%len(ring)]
-            for t in (1/3, 2/3):
-                _draw_dot(int(round(x0 + (x1-x0)*t)), int(round(y0 + (y1-y0)*t)), dot_r)
+            x1, y1 = ring[(i + 1) % len(ring)]
+            for t in (1 / 3, 2 / 3):
+                _draw_dot(int(round(x0 + (x1 - x0) * t)), int(round(y0 + (y1 - y0) * t)), dot_r)

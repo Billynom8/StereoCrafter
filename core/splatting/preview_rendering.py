@@ -256,9 +256,11 @@ class PreviewRenderer:
 
         # Resize depth to target resolution
         disp_map = torch.from_numpy(depth_processed).unsqueeze(0).unsqueeze(0).float().cuda()
+        self.logger.debug(f"disp_map initial shape: {disp_map.shape}, source_resized shape: {source_resized.shape}")
 
         if H_target != disp_map.shape[2] or W_target != disp_map.shape[3]:
             disp_map = F.interpolate(disp_map, size=(H_target, W_target), mode="bilinear", align_corners=False)
+            self.logger.debug(f"disp_map after resize: {disp_map.shape}")
 
         # Calculate disparity
         convergence = float(settings.get("convergence_point", 0.5))
