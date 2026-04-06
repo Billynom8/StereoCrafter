@@ -401,6 +401,26 @@ class PreviewController:
 
         p["left_border_pct"] = l_pct
         p["right_border_pct"] = r_pct
+
+        # Map Qt GUI parameter names to buffer expected names
+        # Qt uses: dilate_x, dilate_y, blur_x, blur_y, dilate_left, blur_left, blur_bias
+        # Buffer expects: depth_dilate_size_x, depth_dilate_size_y, depth_blur_size_x,
+        # depth_blur_size_y, depth_dilate_left, depth_blur_left, depth_blur_left_mix
+        param_mapping = {
+            "gamma": "depth_gamma",
+            "dilate_x": "depth_dilate_size_x",
+            "dilate_y": "depth_dilate_size_y",
+            "blur_x": "depth_blur_size_x",
+            "blur_y": "depth_blur_size_y",
+            "dilate_left": "depth_dilate_left",
+            "blur_left": "depth_blur_left",
+            "blur_bias": "depth_blur_left_mix",
+        }
+
+        for qt_name, buffer_name in param_mapping.items():
+            if qt_name in p:
+                p[buffer_name] = p[qt_name]
+
         return p
 
     # =========================================================================

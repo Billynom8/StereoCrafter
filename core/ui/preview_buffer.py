@@ -62,6 +62,7 @@ class PreviewFrameBuffer:
             str(params.get("enable_global_norm", "")),
             str(params.get("strict_ffmpeg_decode", "")),
             str(params.get("flip_horizontal", False)),
+            str(params.get("cross_view", False)),
             # Merging GUI parameters
             str(params.get("mask_binarize_threshold", "")),
             str(params.get("mask_dilate_kernel_size", "")),

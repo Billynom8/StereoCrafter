@@ -23,6 +23,13 @@ class PreviewWindow(QtWidgets.QDialog):
         self.label.setAlignment(QtCore.Qt.AlignCenter)
         self.layout.addWidget(self.label)
         self.resize(800, 600)
+        self._main_window = parent
+
+    def closeEvent(self, event):
+        """Stop wigglegram timer when preview window is closed."""
+        if self._main_window and hasattr(self._main_window, "_wiggle_timer"):
+            self._main_window._wiggle_timer.stop()
+        event.accept()
 
     def set_image(self, pixmap):
         self.label.setPixmap(
@@ -40,6 +47,13 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.preview_window = PreviewWindow(self)
 
         self.current_video_idx = 0
+
+        # Wigglegram animation state
+        self._wiggle_state = True  # True = show left, False = show right
+        self._wiggle_timer = QtCore.QTimer(self)
+        self._wiggle_timer.timeout.connect(self._wiggle_step)
+        self._wiggle_left_img = None
+        self._wiggle_right_img = None
 
         self._setup_workers()
         self._setup_playback_timer()
@@ -251,6 +265,7 @@ class SplattingApp(QtWidgets.QMainWindow):
 
         self.ui.comboBox_preview_source.currentIndexChanged.connect(self._request_render)
         self.ui.comboBox_border.currentIndexChanged.connect(self._request_render)
+        self.ui.checkBox_cross_view.stateChanged.connect(self._request_render)
 
         self.ui.lineEdit_blur_bias.textChanged.connect(self._request_render)
         self.ui.lineEdit_mesh_extrusion.textChanged.connect(self._request_render)
@@ -297,10 +312,39 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.pushButton_play.setText("▶")
 
     def _on_frame_ready(self, pil_img):
+        # Handle wigglegram tuple (left_img, right_img)
+        if isinstance(pil_img, tuple):
+            self._wiggle_left_img, self._wiggle_right_img = pil_img
+            # Start wiggle timer if not already running
+            if not self._wiggle_timer.isActive() and self.preview_window.isVisible():
+                self._wiggle_timer.start(60)  # 60ms interval
+            # Show first frame
+            self._show_wiggle_frame(self._wiggle_state)
+            return
+
+        # Stop wiggle timer for non-wigglegram modes
+        self._wiggle_timer.stop()
+        self._wiggle_left_img = None
+        self._wiggle_right_img = None
+
         if pil_img and self.preview_window.isVisible():
             pixmap = QtGui.QPixmap.fromImage(ImageQt(pil_img))
             self.preview_window.set_image(pixmap)
-        self._save_sidecar_async()
+            self._save_sidecar_async()
+
+    def _wiggle_step(self):
+        """Toggle wiggle state and display the other frame."""
+        self._wiggle_state = not self._wiggle_state
+        self._show_wiggle_frame(self._wiggle_state)
+
+    def _show_wiggle_frame(self, show_left: bool):
+        """Display either left or right wigglegram frame."""
+        if show_left and self._wiggle_left_img:
+            pixmap = QtGui.QPixmap.fromImage(ImageQt(self._wiggle_left_img))
+            self.preview_window.set_image(pixmap)
+        elif not show_left and self._wiggle_right_img:
+            pixmap = QtGui.QPixmap.fromImage(ImageQt(self._wiggle_right_img))
+            self.preview_window.set_image(pixmap)
 
     def _on_render_error(self, error_msg):
         logger.error(f"Render error: {error_msg}")

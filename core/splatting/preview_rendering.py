@@ -344,19 +344,24 @@ class PreviewRenderer:
             source_resized, right_eye, depth_processed, occlusion_mask, preview_mode, settings
         )
 
-        # Handle wigglegram special case
+        # Handle wigglegram special case - return tuple of (left, right) images
         if preview_mode == "Wigglegram":
-            # Swap wiggle toggle if cross view is enabled? (Essentially swaps eyes)
-            wiggle_state = settings.get("wiggle_toggle", True)
+            # Apply cross_view swap if enabled
             if settings and settings.get("cross_view", False):
-                wiggle_state = not wiggle_state
-
-            if wiggle_state:
-                return Image.fromarray(
+                # Swap: cross-view shows right on left, left on right
+                left_img = Image.fromarray((right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8))
+                right_img = Image.fromarray(
                     (source_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
                 )
             else:
-                return Image.fromarray((right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8))
+                # Normal: left eye is source, right eye is splat result
+                left_img = Image.fromarray(
+                    (source_resized.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                )
+                right_img = Image.fromarray(
+                    (right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+                )
+            return (left_img, right_img)  # Return tuple for wigglegram animation
 
         # Convert to PIL Image
         if final_tensor is not None:
@@ -494,13 +499,21 @@ class PreviewRenderer:
         settings: Dict = None,
     ) -> Optional[torch.Tensor]:
         """Render output based on preview mode."""
+        # Check for cross_view - swap eyes if enabled
+        cross_view = settings.get("cross_view", False) if settings else False
+
         if mode in ["Splat Result", "Splat Result(Low)"]:
-            return right_eye.cpu()
+            # For cross_view, show left eye instead of right
+            return left_eye.cpu() if cross_view else right_eye.cpu()
 
         elif mode == "Side-by-Side":
             l_np = (left_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             r_np = (right_eye.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-            sbs = np.concatenate([l_np, r_np], axis=1)
+            # For cross_view, swap the order from [L|R] to [R|L]
+            if cross_view:
+                sbs = np.concatenate([r_np, l_np], axis=1)
+            else:
+                sbs = np.concatenate([l_np, r_np], axis=1)
             return torch.from_numpy(sbs).permute(2, 0, 1).unsqueeze(0).float() / 255.0
 
         elif mode in ["Occlusion Mask", "Occlusion Mask(Low)"]:
@@ -513,15 +526,23 @@ class PreviewRenderer:
             return self._render_depth_color(depth)
 
         elif mode == "Original (Left Eye)":
-            return left_eye.cpu()
+            # For cross_view, show right eye instead of left
+            return right_eye.cpu() if cross_view else left_eye.cpu()
 
         elif mode == "Anaglyph 3D":
+            # For anaglyph, swap which eye goes to which color channel
+            if cross_view:
+                return self._render_anaglyph_simple(right_eye, left_eye)
             return self._render_anaglyph_simple(left_eye, right_eye)
 
         elif mode == "Dubois Anaglyph":
+            if cross_view:
+                return self._render_anaglyph_dubois(right_eye, left_eye)
             return self._render_anaglyph_dubois(left_eye, right_eye)
 
         elif mode == "Optimized Anaglyph":
+            if cross_view:
+                return self._render_anaglyph_optimized(right_eye, left_eye)
             return self._render_anaglyph_optimized(left_eye, right_eye)
 
         else:
