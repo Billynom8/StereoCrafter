@@ -14,21 +14,93 @@
    <string>Stereocrafter Splatting (Batch) 26-03-29.0</string>
   </property>
   <property name="styleSheet">
-   <string notr="true">QMainWindow { background-color: #2b2b2b; color: #dcdcdc; }
-QWidget { font-family: 'Segoe UI', sans-serif; font-size: 9pt; }
-QGroupBox { font-weight: bold; border: 1px solid #5a5a5a; border-radius: 5px; margin-top: 1ex; padding-top: 10px; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }
-QLabel { color: #dcdcdc; }
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background-color: #3c3f41; border: 1px solid #5a5a5a; color: #dcdcdc; padding: 2px; }
-QPushButton { background-color: #4a4a4a; border: 1px solid #5a5a5a; color: #dcdcdc; padding: 4px 10px; border-radius: 3px; }
-QPushButton:hover { background-color: #5a5a5a; }
-QPushButton:pressed { background-color: #3a3a3a; }
-QProgressBar { border: 1px solid #5a5a5a; border-radius: 3px; text-align: center; background-color: #3c3f41; }
-QProgressBar::chunk { background-color: #3daee9; width: 1px; }
-QSlider::groove:horizontal { border: 1px solid #5a5a5a; height: 4px; background: #3c3f41; margin: 2px 0; border-radius: 2px; }
-QSlider::handle:horizontal { background: #dcdcdc; border: 1px solid #5a5a5a; width: 10px; margin: -3px 0; border-radius: 5px; }
-QCheckBox, QRadioButton { spacing: 5px; }
- </string>
+   
+   <string notr="true">
+/* Only set font, let colors be native */
+QWidget { 
+    font-family: 'Segoe UI', sans-serif; 
+    font-size: 9pt; 
+}
+
+/* Make Group Boxes look clean without hard-coding background colors */
+QGroupBox { 
+    font-weight: bold; 
+    border: 1px solid palette(mid); /* Uses system border color */
+    border-radius: 5px; 
+    margin-top: 1ex; 
+    padding-top: 10px; 
+    background-color: transparent; /* Let system decide bg */
+}
+QGroupBox::title { 
+    subcontrol-origin: margin; 
+    left: 10px; 
+    padding: 0 3px 0 3px; 
+}
+
+/* CUSTOM SLIDER STYLING (This fixes the ugly orange dot) */
+QSlider::groove:horizontal { 
+    border: 1px solid palette(dark); 
+    height: 4px; 
+    background: palette(mid);
+    margin: 2px 0; 
+    border-radius: 2px; 
+}
+QSlider::handle:horizontal { 
+    background: palette(button);
+    border: 1px solid palette(mid); 
+    width: 10px; 
+    height: 10px;
+    margin: -3px 0; 
+    border-radius: 2px; 
+}
+QSlider::handle:horizontal:hover {
+    background: palette(highlight);
+}
+
+/* Keep inputs readable */
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { 
+    background-color: palette(base); 
+    border: 1px solid palette(mid); 
+    color: palette(text); 
+    padding: 2px; 
+    border-radius: 3px;
+}
+
+/* Keep buttons looking like buttons */
+QPushButton { 
+    background-color: palette(button); 
+    border: 1px solid palette(mid); 
+    color: palette(button-text); 
+    padding: 4px 10px; 
+    border-radius: 3px; 
+}
+QPushButton:hover { 
+    background-color: palette(light); 
+}
+QPushButton:pressed { 
+    background-color: palette(dark); 
+}
+QPushButton:checked {
+    background-color: palette(highlight);
+    color: palette(highlighted-text);
+    border: 1px solid palette(highlight);
+    font-weight: bold;
+}
+QPushButton:checked:hover {
+    background-color: palette(light);
+}
+/* Progress bar */
+QProgressBar { 
+    border: 1px solid palette(mid); 
+    border-radius: 3px; 
+    text-align: center; 
+    background-color: palette(window); 
+}
+QProgressBar::chunk { 
+    background-color: palette(highlight); 
+    width: 1px; 
+}
+   </string>
   </property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QGridLayout" name="gridLayout">
@@ -73,7 +145,7 @@ QCheckBox, QRadioButton { spacing: 5px; }
          <item row="0" column="1">
           <widget class="QLineEdit" name="lineEdit_input_source">
            <property name="text">
-            <string>./Clips</string>
+            <string>./workspace/clips</string>
            </property>
           </widget>
          </item>
@@ -94,7 +166,7 @@ QCheckBox, QRadioButton { spacing: 5px; }
          <item row="2" column="1">
           <widget class="QLineEdit" name="lineEdit_output_splatted">
            <property name="text">
-            <string>./Splat</string>
+            <string>./workspace/Splat</string>
            </property>
           </widget>
          </item>
@@ -135,7 +207,7 @@ QCheckBox, QRadioButton { spacing: 5px; }
          <item row="1" column="1">
           <widget class="QLineEdit" name="lineEdit_input_depth">
            <property name="text">
-            <string>./Depth</string>
+            <string>./workspace/depth</string>
            </property>
           </widget>
          </item>
@@ -149,7 +221,7 @@ QCheckBox, QRadioButton { spacing: 5px; }
          <item row="3" column="1">
           <widget class="QLineEdit" name="lineEdit_inout_sidecar">
            <property name="text">
-            <string>./Sidecar</string>
+            <string>./workspace/sidecar</string>
            </property>
           </widget>
          </item>
@@ -193,30 +265,37 @@ QCheckBox, QRadioButton { spacing: 5px; }
          </size>
         </property>
         <property name="styleSheet">
-         <string notr="true">QSlider::groove:horizontal {
+         <string notr="true">
+	QSlider::groove:horizontal {
         height: 14px;
-        background: black;
+        background: palette(mid);
+		border: 1px solid palette(dark);
         border-radius: 2px;
+		margin: 0px; 
     }
     
     QSlider::sub-page:horizontal {
-        background: black;
+        height: 14px;
+        background: palette(mid);
+		border: 1px solid palette(mid);
         border-radius: 2px;
+		margin: 0px; 
     }
     
     QSlider::handle:horizontal {
         background: #666666;
         width: 20px;
-        height: 0px;
-        margin: -8px 0;
+        height: 30px;
+        margin: -10px 0;
         border-radius: 2px;
+		border: 1px solid palette(mid);
     }
     
     QSlider::handle:horizontal:hover {
-        background: #992222;
+        background: palette(highlight);
         width: 20px;
-        height: 0px;
-        margin: -8px 0;
+        height: 30px;
+        margin: -10px 0;
     }</string>
         </property>
         <property name="orientation">
@@ -369,7 +448,7 @@ QCheckBox, QRadioButton { spacing: 5px; }
         </property>
         <property name="icon">
          <iconset>
-          <normaloff>core/ui/icons/loop.svg</normaloff>core/ui/icons/loop.svg</iconset>
+          <normaloff>./core/ui/icons/loop.svg</normaloff>./core/ui/icons/loop.svg</iconset>
         </property>
         <property name="checkable">
          <bool>true</bool>

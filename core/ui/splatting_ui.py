@@ -28,22 +28,94 @@ class Ui_MainWindow(object):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
         MainWindow.resize(1228, 755)
-        MainWindow.setStyleSheet(u"QMainWindow { background-color: #2b2b2b; color: #dcdcdc; }\n"
-"QWidget { font-family: 'Segoe UI', sans-serif; font-size: 9pt; }\n"
-"QGroupBox { font-weight: bold; border: 1px solid #5a5a5a; border-radius: 5px; margin-top: 1ex; padding-top: 10px; }\n"
-"QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px 0 3px; }\n"
-"QLabel { color: #dcdcdc; }\n"
-"QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background-color: #3c3f41; border: 1px solid #5a5a5a; color: #dcdcdc; padding: 2px; }\n"
-"QPushButton { background-color: #4a4a4a; border: 1px solid #5a5a5a; color: #dcdcdc; padding: 4px 10px; border-radius: 3px; }\n"
-"QPushButton:hover { background-color: #5a5a5a; }\n"
-"QPushButton:pressed { background-color: #3a3a3a; }\n"
-"QProgressBar { border: 1px solid #5a5a5a; border-radius: 3px; text-align: center; background-color: #3c3f41; }\n"
-"QProgressBar::chunk { background-color: #3daee9; width: 1px; }\n"
-"QSlider::groove:horizontal { border: 1px solid #5a5a5a; height: 4px; background: #3c3f41; margin: "
-                        "2px 0; border-radius: 2px; }\n"
-"QSlider::handle:horizontal { background: #dcdcdc; border: 1px solid #5a5a5a; width: 10px; margin: -3px 0; border-radius: 5px; }\n"
-"QCheckBox, QRadioButton { spacing: 5px; }\n"
-" ")
+        MainWindow.setStyleSheet(u"\n"
+"/* Only set font, let colors be native */\n"
+"QWidget { \n"
+"    font-family: 'Segoe UI', sans-serif; \n"
+"    font-size: 9pt; \n"
+"}\n"
+"\n"
+"/* Make Group Boxes look clean without hard-coding background colors */\n"
+"QGroupBox { \n"
+"    font-weight: bold; \n"
+"    border: 1px solid palette(mid); /* Uses system border color */\n"
+"    border-radius: 5px; \n"
+"    margin-top: 1ex; \n"
+"    padding-top: 10px; \n"
+"    background-color: transparent; /* Let system decide bg */\n"
+"}\n"
+"QGroupBox::title { \n"
+"    subcontrol-origin: margin; \n"
+"    left: 10px; \n"
+"    padding: 0 3px 0 3px; \n"
+"}\n"
+"\n"
+"/* CUSTOM SLIDER STYLING (This fixes the ugly orange dot) */\n"
+"QSlider::groove:horizontal { \n"
+"    border: 1px solid palette(dark); \n"
+"    height: 4px; \n"
+"    background: palette(mid);\n"
+"    margin: 2px 0; \n"
+"    border-radius: 2px; \n"
+"}\n"
+"QSlider::handle:horizontal { \n"
+"    background: palette(button);\n"
+"    border: 1px solid palette(mid); \n"
+"    width: 10px; \n"
+"    height: 10px;"
+                        "\n"
+"    margin: -3px 0; \n"
+"    border-radius: 2px; \n"
+"}\n"
+"QSlider::handle:horizontal:hover {\n"
+"    background: palette(highlight);\n"
+"}\n"
+"\n"
+"/* Keep inputs readable */\n"
+"QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { \n"
+"    background-color: palette(base); \n"
+"    border: 1px solid palette(mid); \n"
+"    color: palette(text); \n"
+"    padding: 2px; \n"
+"    border-radius: 3px;\n"
+"}\n"
+"\n"
+"/* Keep buttons looking like buttons */\n"
+"QPushButton { \n"
+"    background-color: palette(button); \n"
+"    border: 1px solid palette(mid); \n"
+"    color: palette(button-text); \n"
+"    padding: 4px 10px; \n"
+"    border-radius: 3px; \n"
+"}\n"
+"QPushButton:hover { \n"
+"    background-color: palette(light); \n"
+"}\n"
+"QPushButton:pressed { \n"
+"    background-color: palette(dark); \n"
+"}\n"
+"QPushButton:checked {\n"
+"    background-color: palette(highlight);\n"
+"    color: palette(highlighted-text);\n"
+"    border: 1px solid palette(highlight);\n"
+"    font-weight: bold;\n"
+"}\n"
+"QPushButton:checke"
+                        "d:hover {\n"
+"    background-color: palette(light);\n"
+"}\n"
+"/* Progress bar */\n"
+"QProgressBar { \n"
+"    border: 1px solid palette(mid); \n"
+"    border-radius: 3px; \n"
+"    text-align: center; \n"
+"    background-color: palette(window); \n"
+"}\n"
+"QProgressBar::chunk { \n"
+"    background-color: palette(highlight); \n"
+"    width: 1px; \n"
+"}\n"
+"   ")
         self.action_load_settings = QAction(MainWindow)
         self.action_load_settings.setObjectName(u"action_load_settings")
         self.action_save = QAction(MainWindow)
@@ -187,30 +259,37 @@ class Ui_MainWindow(object):
         self.horizontalSlider = QSlider(self.centralwidget)
         self.horizontalSlider.setObjectName(u"horizontalSlider")
         self.horizontalSlider.setMinimumSize(QSize(0, 60))
-        self.horizontalSlider.setStyleSheet(u"QSlider::groove:horizontal {\n"
+        self.horizontalSlider.setStyleSheet(u"\n"
+"	QSlider::groove:horizontal {\n"
 "        height: 14px;\n"
-"        background: black;\n"
+"        background: palette(mid);\n"
+"		border: 1px solid palette(dark);\n"
 "        border-radius: 2px;\n"
+"		margin: 0px; \n"
 "    }\n"
 "    \n"
 "    QSlider::sub-page:horizontal {\n"
-"        background: black;\n"
+"        height: 14px;\n"
+"        background: palette(mid);\n"
+"		border: 1px solid palette(mid);\n"
 "        border-radius: 2px;\n"
+"		margin: 0px; \n"
 "    }\n"
 "    \n"
 "    QSlider::handle:horizontal {\n"
 "        background: #666666;\n"
 "        width: 20px;\n"
-"        height: 0px;\n"
-"        margin: -8px 0;\n"
+"        height: 30px;\n"
+"        margin: -10px 0;\n"
 "        border-radius: 2px;\n"
+"		border: 1px solid palette(mid);\n"
 "    }\n"
 "    \n"
 "    QSlider::handle:horizontal:hover {\n"
-"        background: #992222;\n"
+"        background: palette(highlight);\n"
 "        width: 20px;\n"
-"        height: 0px;\n"
-"        margin: -8px 0;\n"
+"        height: 30px;\n"
+"        margin: -10px 0;\n"
 "    }")
         self.horizontalSlider.setOrientation(Qt.Orientation.Horizontal)
 
@@ -290,7 +369,7 @@ class Ui_MainWindow(object):
         self.pushButton_settings = QPushButton(self.centralwidget)
         self.pushButton_settings.setObjectName(u"pushButton_settings")
         icon = QIcon()
-        icon.addFile(u"core/ui/icons/loop.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        icon.addFile(u"./core/ui/icons/loop.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         self.pushButton_settings.setIcon(icon)
         self.pushButton_settings.setCheckable(True)
         self.pushButton_settings.setChecked(False)
@@ -1138,17 +1217,17 @@ class Ui_MainWindow(object):
         self.pushButton_browse_output.setText(QCoreApplication.translate("MainWindow", u"Browse Folder", None))
         self.label_input_depth.setText(QCoreApplication.translate("MainWindow", u"Input Depth Maps:", None))
         self.pushButton_browse_depth.setText(QCoreApplication.translate("MainWindow", u"Browse Folder", None))
-        self.lineEdit_input_source.setText(QCoreApplication.translate("MainWindow", u"./Clips", None))
+        self.lineEdit_input_source.setText(QCoreApplication.translate("MainWindow", u"./workspace/clips", None))
         self.pushButton_select_depth.setText(QCoreApplication.translate("MainWindow", u"Select File", None))
         self.checkBox_multi_map.setText(QCoreApplication.translate("MainWindow", u"Multi-Map", None))
-        self.lineEdit_output_splatted.setText(QCoreApplication.translate("MainWindow", u"./Splat", None))
+        self.lineEdit_output_splatted.setText(QCoreApplication.translate("MainWindow", u"./workspace/Splat", None))
         self.label_input_source.setText(QCoreApplication.translate("MainWindow", u"Input Source Clips:", None))
         self.label_output_splatted.setText(QCoreApplication.translate("MainWindow", u"Output Splatted:", None))
         self.pushButton_select_source.setText(QCoreApplication.translate("MainWindow", u"Select File", None))
         self.pushButton_browse_source.setText(QCoreApplication.translate("MainWindow", u"Browse Folder", None))
-        self.lineEdit_input_depth.setText(QCoreApplication.translate("MainWindow", u"./Depth", None))
+        self.lineEdit_input_depth.setText(QCoreApplication.translate("MainWindow", u"./workspace/depth", None))
         self.pushButton_browse_sidecar.setText(QCoreApplication.translate("MainWindow", u"Browse Folder", None))
-        self.lineEdit_inout_sidecar.setText(QCoreApplication.translate("MainWindow", u"./Sidecar", None))
+        self.lineEdit_inout_sidecar.setText(QCoreApplication.translate("MainWindow", u"./workspace/sidecar", None))
         self.label_output_sidecar.setText(QCoreApplication.translate("MainWindow", u"I/O Sidecar:", None))
         self.label_frame_info.setText(QCoreApplication.translate("MainWindow", u"Frame: 0 / 0", None))
         self.label_preview_source.setText(QCoreApplication.translate("MainWindow", u"Preview Source:", None))
