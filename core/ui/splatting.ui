@@ -6,15 +6,18 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1228</width>
+    <width>1309</width>
     <height>755</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Stereocrafter Splatting (Batch) 26-03-29.0</string>
   </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>core/ui/icons/logo.svg</normaloff>core/ui/icons/logo.svg</iconset>
+  </property>
   <property name="styleSheet">
-   
    <string notr="true">
 /* Only set font, let colors be native */
 QWidget { 
@@ -166,7 +169,7 @@ QProgressBar::chunk {
          <item row="2" column="1">
           <widget class="QLineEdit" name="lineEdit_output_splatted">
            <property name="text">
-            <string>./workspace/Splat</string>
+            <string>./workspace/splat</string>
            </property>
           </widget>
          </item>
@@ -417,14 +420,20 @@ QProgressBar::chunk {
       <item>
        <widget class="QPushButton" name="pushButton_play">
         <property name="text">
-         <string>▶</string>
+         <string/>
+        </property>
+        <property name="icon">
+         <iconset theme="QIcon::ThemeIcon::MediaPlaybackStart"/>
         </property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="pushButton_fast_forward">
         <property name="text">
-         <string>&gt;&gt;</string>
+         <string/>
+        </property>
+        <property name="icon">
+         <iconset theme="QIcon::ThemeIcon::MediaSeekForward"/>
         </property>
        </widget>
       </item>
@@ -442,13 +451,12 @@ QProgressBar::chunk {
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="pushButton_settings">
+       <widget class="QPushButton" name="pushButton_loop_toggle">
         <property name="text">
          <string/>
         </property>
         <property name="icon">
-         <iconset>
-          <normaloff>./core/ui/icons/loop.svg</normaloff>./core/ui/icons/loop.svg</iconset>
+         <iconset theme="QIcon::ThemeIcon::MediaPlaylistRepeat"/>
         </property>
         <property name="checkable">
          <bool>true</bool>
@@ -1646,7 +1654,7 @@ QProgressBar::chunk {
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1228</width>
+     <width>1309</width>
      <height>33</height>
     </rect>
    </property>
@@ -1674,7 +1682,6 @@ QProgressBar::chunk {
     </property>
     <addaction name="action_encoder"/>
     <addaction name="separator"/>
-    <addaction name="action_dark_mode"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title">
@@ -1730,17 +1737,18 @@ QProgressBar::chunk {
     <string>Encoder Settings</string>
    </property>
   </action>
-  <action name="action_dark_mode">
-   <property name="text">
-    <string>Dark Mode</string>
-   </property>
-  </action>
   <action name="action_update_from_sidecar">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
    <property name="text">
     <string>Load Sidecar Data</string>
    </property>
   </action>
   <action name="action_auto_update_sidecar">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
    <property name="text">
     <string>Save Sidecar on Next</string>
    </property>
@@ -1756,6 +1764,9 @@ QProgressBar::chunk {
    </property>
   </action>
   <action name="action_debug">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
    <property name="text">
     <string>Debug Logging</string>
    </property>
@@ -1792,7 +1803,7 @@ QProgressBar::chunk {
   <tabstop>pushButton_play</tabstop>
   <tabstop>pushButton_fast_forward</tabstop>
   <tabstop>spinBox_ff_speed</tabstop>
-  <tabstop>pushButton_settings</tabstop>
+  <tabstop>pushButton_loop_toggle</tabstop>
   <tabstop>comboBox_map_select</tabstop>
   <tabstop>checkBox_enable_full_res</tabstop>
   <tabstop>lineEdit_high_batch</tabstop>

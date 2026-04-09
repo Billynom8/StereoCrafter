@@ -27,7 +27,10 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(1228, 755)
+        MainWindow.resize(1309, 755)
+        icon = QIcon()
+        icon.addFile(u"core/ui/icons/logo.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        MainWindow.setWindowIcon(icon)
         MainWindow.setStyleSheet(u"\n"
 "/* Only set font, let colors be native */\n"
 "QWidget { \n"
@@ -130,18 +133,19 @@ class Ui_MainWindow(object):
         self.action_restore_from_finished.setObjectName(u"action_restore_from_finished")
         self.action_encoder = QAction(MainWindow)
         self.action_encoder.setObjectName(u"action_encoder")
-        self.action_dark_mode = QAction(MainWindow)
-        self.action_dark_mode.setObjectName(u"action_dark_mode")
         self.action_update_from_sidecar = QAction(MainWindow)
         self.action_update_from_sidecar.setObjectName(u"action_update_from_sidecar")
+        self.action_update_from_sidecar.setCheckable(True)
         self.action_auto_update_sidecar = QAction(MainWindow)
         self.action_auto_update_sidecar.setObjectName(u"action_auto_update_sidecar")
+        self.action_auto_update_sidecar.setCheckable(True)
         self.action_guide = QAction(MainWindow)
         self.action_guide.setObjectName(u"action_guide")
         self.action_calculator = QAction(MainWindow)
         self.action_calculator.setObjectName(u"action_calculator")
         self.action_debug = QAction(MainWindow)
         self.action_debug.setObjectName(u"action_debug")
+        self.action_debug.setCheckable(True)
         self.action_about = QAction(MainWindow)
         self.action_about.setObjectName(u"action_about")
         self.action_exit = QAction(MainWindow)
@@ -351,11 +355,15 @@ class Ui_MainWindow(object):
 
         self.pushButton_play = QPushButton(self.centralwidget)
         self.pushButton_play.setObjectName(u"pushButton_play")
+        icon1 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.MediaPlaybackStart))
+        self.pushButton_play.setIcon(icon1)
 
         self.horizontalLayout_preview_controls.addWidget(self.pushButton_play)
 
         self.pushButton_fast_forward = QPushButton(self.centralwidget)
         self.pushButton_fast_forward.setObjectName(u"pushButton_fast_forward")
+        icon2 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.MediaSeekForward))
+        self.pushButton_fast_forward.setIcon(icon2)
 
         self.horizontalLayout_preview_controls.addWidget(self.pushButton_fast_forward)
 
@@ -366,16 +374,15 @@ class Ui_MainWindow(object):
 
         self.horizontalLayout_preview_controls.addWidget(self.spinBox_ff_speed)
 
-        self.pushButton_settings = QPushButton(self.centralwidget)
-        self.pushButton_settings.setObjectName(u"pushButton_settings")
-        icon = QIcon()
-        icon.addFile(u"./core/ui/icons/loop.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.pushButton_settings.setIcon(icon)
-        self.pushButton_settings.setCheckable(True)
-        self.pushButton_settings.setChecked(False)
-        self.pushButton_settings.setFlat(False)
+        self.pushButton_loop_toggle = QPushButton(self.centralwidget)
+        self.pushButton_loop_toggle.setObjectName(u"pushButton_loop_toggle")
+        icon3 = QIcon(QIcon.fromTheme(QIcon.ThemeIcon.MediaPlaylistRepeat))
+        self.pushButton_loop_toggle.setIcon(icon3)
+        self.pushButton_loop_toggle.setCheckable(True)
+        self.pushButton_loop_toggle.setChecked(False)
+        self.pushButton_loop_toggle.setFlat(False)
 
-        self.horizontalLayout_preview_controls.addWidget(self.pushButton_settings)
+        self.horizontalLayout_preview_controls.addWidget(self.pushButton_loop_toggle)
 
         self.label_depth_map = QLabel(self.centralwidget)
         self.label_depth_map.setObjectName(u"label_depth_map")
@@ -1092,7 +1099,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 1228, 33))
+        self.menubar.setGeometry(QRect(0, 0, 1309, 33))
         self.menuFile = QMenu(self.menubar)
         self.menuFile.setObjectName(u"menuFile")
         self.menuOptions = QMenu(self.menubar)
@@ -1122,8 +1129,8 @@ class Ui_MainWindow(object):
         QWidget.setTabOrder(self.lineEdit_jump_to, self.pushButton_play)
         QWidget.setTabOrder(self.pushButton_play, self.pushButton_fast_forward)
         QWidget.setTabOrder(self.pushButton_fast_forward, self.spinBox_ff_speed)
-        QWidget.setTabOrder(self.spinBox_ff_speed, self.pushButton_settings)
-        QWidget.setTabOrder(self.pushButton_settings, self.comboBox_map_select)
+        QWidget.setTabOrder(self.spinBox_ff_speed, self.pushButton_loop_toggle)
+        QWidget.setTabOrder(self.pushButton_loop_toggle, self.comboBox_map_select)
         QWidget.setTabOrder(self.comboBox_map_select, self.checkBox_enable_full_res)
         QWidget.setTabOrder(self.checkBox_enable_full_res, self.lineEdit_high_batch)
         QWidget.setTabOrder(self.lineEdit_high_batch, self.checkBox_dual_output)
@@ -1177,7 +1184,6 @@ class Ui_MainWindow(object):
         self.menuFile.addAction(self.action_exit)
         self.menuOptions.addAction(self.action_encoder)
         self.menuOptions.addSeparator()
-        self.menuOptions.addAction(self.action_dark_mode)
         self.menuHelp.addAction(self.action_guide)
         self.menuHelp.addAction(self.action_calculator)
         self.menuHelp.addSeparator()
@@ -1187,7 +1193,7 @@ class Ui_MainWindow(object):
 
         self.retranslateUi(MainWindow)
 
-        self.pushButton_settings.setDefault(False)
+        self.pushButton_loop_toggle.setDefault(False)
 
 
         QMetaObject.connectSlotsByName(MainWindow)
@@ -1205,7 +1211,6 @@ class Ui_MainWindow(object):
         self.action_fsexport_to_sidecar.setText(QCoreApplication.translate("MainWindow", u"FSExport to Custom Sidecar...", None))
         self.action_restore_from_finished.setText(QCoreApplication.translate("MainWindow", u"Restore Finished Files", None))
         self.action_encoder.setText(QCoreApplication.translate("MainWindow", u"Encoder Settings", None))
-        self.action_dark_mode.setText(QCoreApplication.translate("MainWindow", u"Dark Mode", None))
         self.action_update_from_sidecar.setText(QCoreApplication.translate("MainWindow", u"Load Sidecar Data", None))
         self.action_auto_update_sidecar.setText(QCoreApplication.translate("MainWindow", u"Save Sidecar on Next", None))
         self.action_guide.setText(QCoreApplication.translate("MainWindow", u"User Guide", None))
@@ -1220,7 +1225,7 @@ class Ui_MainWindow(object):
         self.lineEdit_input_source.setText(QCoreApplication.translate("MainWindow", u"./workspace/clips", None))
         self.pushButton_select_depth.setText(QCoreApplication.translate("MainWindow", u"Select File", None))
         self.checkBox_multi_map.setText(QCoreApplication.translate("MainWindow", u"Multi-Map", None))
-        self.lineEdit_output_splatted.setText(QCoreApplication.translate("MainWindow", u"./workspace/Splat", None))
+        self.lineEdit_output_splatted.setText(QCoreApplication.translate("MainWindow", u"./workspace/splat", None))
         self.label_input_source.setText(QCoreApplication.translate("MainWindow", u"Input Source Clips:", None))
         self.label_output_splatted.setText(QCoreApplication.translate("MainWindow", u"Output Splatted:", None))
         self.pushButton_select_source.setText(QCoreApplication.translate("MainWindow", u"Select File", None))
@@ -1248,9 +1253,9 @@ class Ui_MainWindow(object):
         self.label_jump_to.setText(QCoreApplication.translate("MainWindow", u"Jump to:", None))
         self.lineEdit_jump_to.setText(QCoreApplication.translate("MainWindow", u"1", None))
         self.label_video_info.setText(QCoreApplication.translate("MainWindow", u"Video: 0 / 0", None))
-        self.pushButton_play.setText(QCoreApplication.translate("MainWindow", u"\u25b6", None))
-        self.pushButton_fast_forward.setText(QCoreApplication.translate("MainWindow", u">>", None))
-        self.pushButton_settings.setText("")
+        self.pushButton_play.setText("")
+        self.pushButton_fast_forward.setText("")
+        self.pushButton_loop_toggle.setText("")
         self.label_depth_map.setText(QCoreApplication.translate("MainWindow", u"Depth Map:", None))
         self.comboBox_map_select.setItemText(0, QCoreApplication.translate("MainWindow", u"Default", None))
         self.comboBox_map_select.setItemText(1, "")

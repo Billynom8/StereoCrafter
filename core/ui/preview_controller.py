@@ -50,7 +50,11 @@ class PreviewController:
 
         # Sidecar Configuration
         self._sidecar_folder: str = "./Sidecar"
-        self._sidecar_extension: str = ".json"
+        self._sidecar_extension: str = ".fssidecar"
+
+    def set_sidecar_extension(self, ext: str):
+        """Set the sidecar file extension."""
+        self._sidecar_extension = ext
 
         # Border Scanner
         self.border_scanner = BorderScanner()

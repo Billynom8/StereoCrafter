@@ -1,6 +1,6 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-04-07
+**Analysis Date:** 2026-04-09
 
 ## Directory Layout
 
@@ -129,7 +129,7 @@ StereoCrafter/
 ├── source_video/            # Sample/test videos
 ├── weights/                 # Model weights directory
 ├── splatting_gui.py         # Primary Tkinter GUI (splatting) ~4000+ lines
-├── splatting_gui_qt.py      # PySide6 GUI (splatting) 574 lines
+├── splatting_gui_qt.py      # PySide6 GUI (splatting) ~775 lines, includes batch processing
 ├── merging_gui.py           # Tkinter GUI (merging) ~2453 lines
 ├── inpainting_gui.py        # Tkinter GUI (inpainting) ~3935 lines
 ├── depthcrafter_gui_seg.py  # Tkinter GUI (depth generation) ~3026 lines
@@ -196,7 +196,7 @@ StereoCrafter/
 
 - **`splatting_gui.py`** - Primary application (~5897 lines). Main Tkinter GUI with all features.
 
-- **`splatting_gui_qt.py`** - Qt alternative (574 lines). Cleaner architecture using `PreviewController`.
+- **`splatting_gui_qt.py`** - PySide6 Qt GUI (~775 lines). Cleaner architecture using `PreviewController`, `SplattingController` for batch processing, and `ProcessingSettings`.
 
 ## Naming Conventions
 

@@ -252,27 +252,27 @@ splatting_gui_qt.py                 # [NEEDS UPDATE] Use enhanced controller
 ## Testing Checklist
 
 ### Unit Tests (Headless)
-- [ ] `PreviewController.load_video_list()` with various paths
-- [ ] `PreviewController.set_current_video()` opens readers correctly
+- [x] `PreviewController.load_video_list()` with various paths
+- [x] `PreviewController.set_current_video()` opens readers correctly
 - [x] `PreviewController.get_frame()` returns valid PIL Image
-- [ ] Frame buffer caching works (cache hit/miss)
-- [ ] Depth bit-depth detection for 8-bit, 10-bit, 16-bit
-- [ ] Sidecar save/load round-trip
-- [ ] Playback state machine: start/stop/advance/loop
+- [x] Frame buffer caching works (cache hit/miss)
+- [x] Depth bit-depth detection for 8-bit, 10-bit, 16-bit
+- [x] Sidecar save/load round-trip
+- [x] Playback state machine: start/stop/advance/loop
 
 ### Integration Tests (GUI)
-- [ ] Video navigation (prev/next/jump)
-- [ ] Playback (play/pause/FF/loop)
-- [ ] Parameter changes update preview
+- [x] Video navigation (prev/next/jump)
+- [x] Playback (play/pause/FF/loop)
+- [x] Parameter changes update preview
 - [ ] Sidecar persistence across video switches
 - [ ] Multi-map support
-- [ ] QThread workers don't block UI
+- [x] QThread workers don't block UI
 
 ---
 
 ## Next Steps
 
-### Immediate (High Priority)
+### Immediate (High Priority), `action_load_fsexport`
 1. [x] Update `splatting_gui_qt.py` to use new controller methods
 2. [x] Integrate QThread workers into GUI
 3. [ ] Test sidecar save/load with real data

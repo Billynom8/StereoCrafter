@@ -1,6 +1,6 @@
 # External Integrations
 
-**Analysis Date:** 2026-04-07
+**Analysis Date:** 2026-04-09
 
 ## Model Hub / External Services
 
@@ -27,7 +27,7 @@
 - No database detected
 - Configuration stored as JSON files:
   - GUI configs: `config_depthcrafter.json`, `config_inpaint.json`
-  - Per-video sidecars: JSON files co-located with video outputs (`core/common/sidecar_manager.py`)
+  - Per-video sidecars: `.fssidecar` files co-located with video outputs (`core/common/sidecar_manager.py`)
   - Help content: `dependency/inpaint_help.json`, `dependency/merge_help.json`, `dependency/splatter_help.json`, `depthcrafter/help_content.json`
 
 **Model Weights:**

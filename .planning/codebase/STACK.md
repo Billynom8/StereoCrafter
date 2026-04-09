@@ -1,6 +1,6 @@
 # Tech Stack
 
-**Analysis Date:** 2026-04-07
+**Analysis Date:** 2026-04-09
 
 ## Languages & Runtime
 
@@ -99,7 +99,7 @@ Located in `weights/`:
 ## Notable Patterns
 
 - **Dual GUI frameworks:** Tkinter (legacy, 4 GUIs) and PySide6 (new, `splatting_gui_qt.py`) coexist
-- **Sidecar JSON configs:** Per-video `.json` sidecar files store splatting parameters (`core/common/sidecar_manager.py`)
+- **Sidecar configs:** Per-video `.fssidecar` files store splatting parameters (`core/common/sidecar_manager.py`)
 - **Custom diffusion pipelines:** `pipelines/stereo_video_inpainting.py` extends `DiffusersPipeline` for stereo inpainting
 - **DepthCrafter custom pipeline:** `depthcrafter/depth_crafter_ppl.py` extends `StableVideoDiffusionPipeline` with chunked encoding
 - **FFmpeg subprocess encoding:** Video output piped directly to FFmpeg via stdin (`core/common/video_io.py`)

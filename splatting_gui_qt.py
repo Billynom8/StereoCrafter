@@ -6,11 +6,13 @@ from PySide6 import QtWidgets, QtGui, QtCore
 from PySide6.QtGui import QDoubleValidator, QIntValidator
 from core.ui.splatting_ui import Ui_MainWindow
 from core.ui.preview_controller import PreviewController
+from core.splatting.controller import SplattingController
+from core.splatting.batch_processing import ProcessingSettings
 from core.ui.workers.preview_render_worker import PreviewRenderWorker
 from core.ui.workers.playback_worker import PlaybackWorker
 from PIL.ImageQt import ImageQt
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +46,7 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.setupUi(self)
 
         self.controller = PreviewController()
+        self.batch_controller = SplattingController()
         self.preview_window = PreviewWindow(self)
 
         self.current_video_idx = 0
@@ -54,9 +57,11 @@ class SplattingApp(QtWidgets.QMainWindow):
         self._wiggle_timer.timeout.connect(self._wiggle_step)
         self._wiggle_left_img = None
         self._wiggle_right_img = None
+        self._auto_save_sidecar = False
 
         self._setup_workers()
         self._setup_playback_timer()
+        self._setup_processing()
         self.connect_signals()
         self.init_ui_defaults()
         self.load_config()
@@ -81,9 +86,36 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.play_timer.timeout.connect(self.playback_worker.tick)
         self._is_fast_forward = False
 
+    def _setup_processing(self):
+        self._processing_timer = QtCore.QTimer(self)
+        self._processing_timer.timeout.connect(self._check_batch_progress)
+        self._processing_timer.start(100)
+
+    def _check_batch_progress(self):
+        progress = self.batch_controller.get_progress()
+        if progress is None:
+            return
+        if progress == "finished":
+            self._processing_timer.stop()
+            self.ui.label_status.setText("Processing complete")
+            self._enable_inputs(True)
+            return
+        if isinstance(progress, tuple):
+            msg_type = progress[0]
+            if msg_type == "status":
+                self.ui.label_status.setText(progress[1])
+            elif msg_type == "total":
+                self.ui.progressBar.setMaximum(progress[1])
+                self.ui.progressBar.setValue(0)
+            elif msg_type == "processed":
+                self.ui.progressBar.setValue(progress[1])
+            elif msg_type == "update_info":
+                self.ui.label_info_filename_value.setText(progress[1].get("filename", ""))
+
     def closeEvent(self, event):
         self.save_config()
         self.play_timer.stop()
+        self.batch_controller.stop()
         self.render_worker.stop()
         self.render_thread.quit()
         self.render_thread.wait(2000)
@@ -122,10 +154,10 @@ class SplattingApp(QtWidgets.QMainWindow):
             with open("config_splat.splatcfg", "r") as f:
                 config = json.load(f)
 
-            self.ui.lineEdit_input_source.setText(config.get("input_source", "./Clips"))
-            self.ui.lineEdit_input_depth.setText(config.get("input_depth", "./Depth"))
-            self.ui.lineEdit_output_splatted.setText(config.get("output_splatted", "./Splat"))
-            self.ui.lineEdit_inout_sidecar.setText(str(config.get("sidecar_path", "./Sidecar")))
+            self.ui.lineEdit_input_source.setText(config.get("input_source", "./workspace/clips"))
+            self.ui.lineEdit_input_depth.setText(config.get("input_depth", "./workspace/depth"))
+            self.ui.lineEdit_output_splatted.setText(config.get("output_splatted", "./workspace/splat"))
+            self.ui.lineEdit_inout_sidecar.setText(str(config.get("sidecar_path", "./workspace/sidecar")))
             self.ui.checkBox_multi_map.setChecked(config.get("multi_map", False))
             self.ui.lineEdit_low_width.setText(str(config.get("low_width", "640")))
             self.ui.lineEdit_low_height.setText(str(config.get("low_height", "320")))
@@ -245,7 +277,7 @@ class SplattingApp(QtWidgets.QMainWindow):
 
         self.ui.lineEdit_jump_to.returnPressed.connect(self.on_jump_to_clip)
 
-        self.ui.pushButton_settings.clicked.connect(self.toggle_preview_window)
+        self.ui.pushButton_loop_toggle.toggled.connect(self.on_loop_toggled)
 
         mappings = [
             (self.ui.horizontalSlider_disparity, self.ui.label_disparity_value, 1.0),
@@ -265,12 +297,27 @@ class SplattingApp(QtWidgets.QMainWindow):
 
         self.ui.comboBox_preview_source.currentIndexChanged.connect(self._request_render)
         self.ui.comboBox_border.currentIndexChanged.connect(self._request_render)
-        self.ui.checkBox_cross_view.stateChanged.connect(self._request_render)
+        self.ui.checkBox_cross_view.stateChanged.connect(
+            lambda state: (logger.debug(f"checkBox_cross_view toggled: state={state}"), self._request_render())
+        )
 
         self.ui.lineEdit_blur_bias.textChanged.connect(self._request_render)
         self.ui.lineEdit_mesh_extrusion.textChanged.connect(self._request_render)
         self.ui.lineEdit_mesh_density.textChanged.connect(self._request_render)
         self.ui.lineEdit_mesh_bias.textChanged.connect(self._request_render)
+
+        self.ui.action_calculator.triggered.connect(self.on_action_calculator)
+        self.ui.action_load_settings.triggered.connect(self.on_load_settings)
+        self.ui.action_save.triggered.connect(self.on_save_settings)
+        self.ui.action_save_to_file.triggered.connect(self.on_save_settings_to_file)
+        self.ui.action_fsexport_to_sidecar.triggered.connect(self.on_fsexport_to_sidecar)
+        self.ui.action_update_from_sidecar.triggered.connect(self.on_update_from_sidecar)
+        self.ui.action_auto_update_sidecar.triggered.connect(self.on_auto_update_sidecar)
+
+        self.ui.pushButton_start.clicked.connect(self.on_start_processing)
+        self.ui.pushButton_stop.clicked.connect(self.on_stop_processing)
+        self.ui.pushButton_single.clicked.connect(self.on_start_single_processing)
+        self.ui.pushButton_update_sidecar.clicked.connect(self.save_sidecar)
 
     def on_bias_change(self, value):
         bias_val = (value - 50) / 50.0
@@ -310,6 +357,9 @@ class SplattingApp(QtWidgets.QMainWindow):
     def _on_playback_finished(self):
         self.play_timer.stop()
         self.ui.pushButton_play.setText("▶")
+
+    def on_loop_toggled(self, checked):
+        self.playback_worker.set_loop_enabled(checked)
 
     def _on_frame_ready(self, pil_img):
         # Handle wigglegram tuple (left_img, right_img)
@@ -379,7 +429,15 @@ class SplattingApp(QtWidgets.QMainWindow):
     def load_videos(self):
         src = self.ui.lineEdit_input_source.text()
         depth = self.ui.lineEdit_input_depth.text()
+        sidecar = self.ui.lineEdit_inout_sidecar.text()
         multi = self.ui.checkBox_multi_map.isChecked()
+
+        self.controller.set_sidecar_folder(sidecar)
+        self.batch_controller.sidecar_folder = sidecar
+        self.batch_controller.input_source_clips = src
+        self.batch_controller.input_depth_maps = depth
+        self.batch_controller.output_splatted = self.ui.lineEdit_output_splatted.text()
+        self.batch_controller.video_list = self.controller.video_list
 
         old_path = None
         if self.controller.video_list:
@@ -460,8 +518,9 @@ class SplattingApp(QtWidgets.QMainWindow):
         return self.controller.get_sidecar_path()
 
     def _save_sidecar_async(self):
-        params = self.get_params()
-        self.controller.save_sidecar(params)
+        if self._auto_save_sidecar:
+            params = self.get_params()
+            self.controller.save_sidecar(params)
 
     def save_sidecar(self):
         params = self.get_params()
@@ -565,6 +624,149 @@ class SplattingApp(QtWidgets.QMainWindow):
             }
         except Exception:
             return {}
+
+    def on_action_calculator(self):
+        import subprocess
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        calculator_path = os.path.join(base_dir, "..", "scripts", "ResCalc_v3.html")
+        calculator_path = os.path.normpath(calculator_path)
+        if os.path.exists(calculator_path):
+            subprocess.Popen(["start", "", calculator_path], shell=True)
+        else:
+            logger.error(f"Calculator not found: {calculator_path}")
+
+    def _get_processing_settings(self) -> ProcessingSettings:
+        settings = ProcessingSettings(
+            input_source_clips=self.ui.lineEdit_input_source.text(),
+            input_depth_maps=self.ui.lineEdit_input_depth.text(),
+            output_splatted=self.ui.lineEdit_output_splatted.text(),
+            max_disp=float(self.ui.horizontalSlider_disparity.value()),
+            zero_disparity_anchor=float(self.ui.horizontalSlider_convergence.value()) / 100.0,
+            depth_gamma=float(self.ui.horizontalSlider_gamma.value()) / 100.0,
+            process_length=int(self.ui.lineEdit_process_length.text() or -1),
+            enable_full_resolution=self.ui.checkBox_enable_full_res.isChecked(),
+            full_res_batch_size=int(self.ui.lineEdit_high_batch.text() or 10),
+            enable_low_resolution=self.ui.checkBox_enable_low_res.isChecked(),
+            low_res_width=int(self.ui.lineEdit_low_width.text() or 1920),
+            low_res_height=int(self.ui.lineEdit_low_height.text() or 1080),
+            low_res_batch_size=int(self.ui.lineEdit_low_batch.text() or 50),
+            dual_output=self.ui.checkBox_dual_output.isChecked(),
+            strict_ffmpeg_decode=self.ui.checkBox_ffmpeg.isChecked(),
+            move_to_finished=True,
+            sidecar_folder=self.ui.lineEdit_inout_sidecar.text(),
+            multi_map=self.ui.checkBox_multi_map.isChecked(),
+            depth_dilate_size_x=float(self.ui.horizontalSlider_dilate_x.value()),
+            depth_dilate_size_y=float(self.ui.horizontalSlider_dilate_y.value()),
+            depth_blur_size_x=float(self.ui.horizontalSlider_blur_x.value()),
+            depth_blur_size_y=float(self.ui.horizontalSlider_blur_y.value()),
+        )
+        return settings
+
+    def _enable_inputs(self, enabled: bool):
+        state = "normal" if enabled else "disabled"
+        self.ui.pushButton_start.setEnabled(enabled)
+        self.ui.pushButton_single.setEnabled(enabled)
+        self.ui.pushButton_stop.setEnabled(not enabled)
+        self.ui.pushButton_load_refresh.setEnabled(enabled)
+
+    def on_start_processing(self):
+        self._enable_inputs(False)
+        self.batch_controller.stop_event.clear()
+        settings = self._get_processing_settings()
+        self.batch_controller.start_batch(settings)
+        self._processing_timer.start(100)
+
+    def on_stop_processing(self):
+        self.batch_controller.stop()
+        self.ui.label_status.setText("Stopping...")
+
+    def on_start_single_processing(self):
+        self._enable_inputs(False)
+        self.batch_controller.stop_event.clear()
+        settings = self._get_processing_settings()
+        self.batch_controller.start_batch(
+            settings, from_index=self.current_video_idx, to_index=self.current_video_idx + 1
+        )
+        self._processing_timer.start(100)
+
+    def on_load_settings(self):
+        from core.splatting.config_manager import load_settings_from_file
+
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load Settings from File", "", "Splat Config (*.splatcfg);;JSON files (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            config = load_settings_from_file(filename)
+            self._apply_config_to_ui(config)
+            self.ui.label_status.setText("Settings loaded.")
+        except Exception as e:
+            logger.error(f"Failed to load settings: {e}")
+
+    def on_save_settings(self):
+        config = self.get_params()
+        self.save_config()
+        self.ui.label_status.setText("Settings saved.")
+
+    def on_save_settings_to_file(self):
+        from core.splatting.config_manager import save_settings_to_file
+
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save Settings to File", "", "Splat Config (*.splatcfg);;JSON files (*.json)"
+        )
+        if not filename:
+            return
+        try:
+            config = self.get_params()
+            save_settings_to_file(config, filename)
+            self.ui.label_status.setText(f"Saved settings to {os.path.basename(filename)}")
+        except Exception as e:
+            logger.error(f"Failed to save settings: {e}")
+
+    def on_fsexport_to_sidecar(self):
+        from core.splatting.fusion_export import FusionSidecarGenerator
+
+        sidecar_path = self.controller.get_sidecar_path()
+        if not sidecar_path:
+            return
+        generator = FusionSidecarGenerator()
+        generator.generate_sidecar(sidecar_path, self.get_params())
+        self.ui.label_status.setText("FSExport sidecar generated.")
+
+    def on_update_from_sidecar(self):
+        self._load_sidecar()
+        self.ui.label_status.setText("Loaded sidecar data.")
+
+    def on_auto_update_sidecar(self, checked):
+        self._auto_save_sidecar = checked
+
+    def _apply_config_to_ui(self, config: dict):
+        """Apply loaded config to UI widgets."""
+        if "max_disp" in config:
+            self.ui.horizontalSlider_disparity.setValue(int(config["max_disp"]))
+        if "convergence_point" in config:
+            self.ui.horizontalSlider_convergence.setValue(int(float(config["convergence_point"]) * 100))
+        if "gamma" in config:
+            self.ui.horizontalSlider_gamma.setValue(int(float(config["gamma"]) * 100))
+        if "slider_border_width" in config:
+            self.ui.horizontalSlider_border_width.setValue(config["slider_border_width"])
+        if "slider_bias" in config:
+            self.ui.horizontalSlider_border_bias.setValue(config["slider_bias"])
+        if "input_source" in config:
+            self.ui.lineEdit_input_source.setText(config["input_source"])
+        if "input_depth" in config:
+            self.ui.lineEdit_input_depth.setText(config["input_depth"])
+        if "output_splatted" in config:
+            self.ui.lineEdit_output_splatted.setText(config["output_splatted"])
+        if "sidecar_path" in config:
+            self.ui.lineEdit_inout_sidecar.setText(config["sidecar_path"])
+        if "preview_source" in config:
+            idx = self.ui.comboBox_preview_source.findText(config["preview_source"])
+            if idx >= 0:
+                self.ui.comboBox_preview_source.setCurrentIndex(idx)
+        self.update_all_labels()
 
 
 if __name__ == "__main__":
