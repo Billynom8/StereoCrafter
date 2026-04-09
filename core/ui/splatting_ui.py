@@ -411,6 +411,7 @@ class Ui_MainWindow(object):
         self.comboBox_preview_scale = QComboBox(self.centralwidget)
         self.comboBox_preview_scale.addItem("")
         self.comboBox_preview_scale.setObjectName(u"comboBox_preview_scale")
+        self.comboBox_preview_scale.setMinimumSize(QSize(60, 0))
 
         self.horizontalLayout_preview_controls.addWidget(self.comboBox_preview_scale)
 

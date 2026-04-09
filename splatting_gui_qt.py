@@ -23,9 +23,38 @@ class PreviewWindow(QtWidgets.QDialog):
         self.layout = QtWidgets.QVBoxLayout(self)
         self.label = QtWidgets.QLabel("No Video Loaded")
         self.label.setAlignment(QtCore.Qt.AlignCenter)
+        self.label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.layout.addWidget(self.label)
         self.resize(800, 600)
         self._main_window = parent
+        self._current_pixmap = None
+        self._scale_factor = None  # None = auto (fit to window), float = fixed scale
+
+    def set_scale_factor(self, factor):
+        """Set a fixed scale factor (e.g., 1.0 = 100%, 0.5 = 50%). None for auto-fit."""
+        self._scale_factor = factor
+        if self._current_pixmap:
+            self._update_display()
+
+    def _get_scaled_size(self):
+        """Calculate target size based on scale factor or auto-fit to window."""
+        if self._current_pixmap is None:
+            return self.label.size()
+
+        if self._scale_factor is None:
+            return self.label.size()
+        else:
+            w = int(self._current_pixmap.width() * self._scale_factor)
+            h = int(self._current_pixmap.height() * self._scale_factor)
+            return QtCore.QSize(w, h)
+
+    def _update_display(self):
+        """Update label with current pixmap scaled appropriately."""
+        if self._current_pixmap:
+            target_size = self._get_scaled_size()
+            self.label.setPixmap(
+                self._current_pixmap.scaled(target_size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+            )
 
     def closeEvent(self, event):
         """Stop wigglegram timer when preview window is closed."""
@@ -33,10 +62,13 @@ class PreviewWindow(QtWidgets.QDialog):
             self._main_window._wiggle_timer.stop()
         event.accept()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_display()
+
     def set_image(self, pixmap):
-        self.label.setPixmap(
-            pixmap.scaled(self.label.size(), QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
-        )
+        self._current_pixmap = pixmap
+        self._update_display()
 
 
 class SplattingApp(QtWidgets.QMainWindow):
@@ -78,8 +110,12 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.playback_worker = PlaybackWorker()
         self.playback_worker.frame_advanced.connect(self._on_frame_advanced)
         self.playback_worker.playback_finished.connect(self._on_playback_finished)
-        self.playback_worker.playback_started.connect(lambda: self.ui.pushButton_play.setText("⏸"))
-        self.playback_worker.playback_stopped.connect(lambda: self.ui.pushButton_play.setText("▶"))
+        self.playback_worker.playback_started.connect(
+            lambda: self.ui.pushButton_play.setIcon(QtGui.QIcon.fromTheme("media-playback-pause"))
+        )
+        self.playback_worker.playback_stopped.connect(
+            lambda: self.ui.pushButton_play.setIcon(QtGui.QIcon.fromTheme("media-playback-start"))
+        )
 
     def _setup_playback_timer(self):
         self.play_timer = QtCore.QTimer(self)
@@ -138,6 +174,8 @@ class SplattingApp(QtWidgets.QMainWindow):
         config["slider_gamma"] = self.ui.horizontalSlider_gamma.value()
         config["slider_border_width"] = self.ui.horizontalSlider_border_width.value()
         config["slider_bias"] = self.ui.horizontalSlider_border_bias.value()
+        config["preview_scale"] = self.ui.comboBox_preview_scale.currentText()
+        config["debug_logging"] = self.ui.action_debug.isChecked()
 
         try:
             with open("config_splat.splatcfg", "w") as f:
@@ -193,6 +231,15 @@ class SplattingApp(QtWidgets.QMainWindow):
                 if idx >= 0:
                     self.ui.comboBox_preview_source.setCurrentIndex(idx)
 
+                preview_scale = config.get("preview_scale", "Auto")
+                if preview_scale:
+                    idx = self.ui.comboBox_preview_scale.findText(preview_scale)
+                    if idx >= 0:
+                        self.ui.comboBox_preview_scale.setCurrentIndex(idx)
+                        self.on_preview_scale_changed(preview_scale)
+
+                self.ui.action_debug.setChecked(config.get("debug_logging", False))
+
             finally:
                 self.ui.centralwidget.blockSignals(False)
 
@@ -206,17 +253,19 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.comboBox_preview_source.clear()
         modes = [
             "Splat Result",
+            "Splat Result(Low)",
+            "Occlusion Mask",
+            "Occlusion Mask(Low)",
             "Original (Left Eye)",
             "Depth Map",
             "Depth Map (Color)",
             "Anaglyph 3D",
             "Dubois Anaglyph",
             "Optimized Anaglyph",
-            "Wigglegram",
             "Side-by-Side",
+            "Wigglegram",
             "Mesh Warp",
             "SBS + Mesh",
-            "Mesh Warp SBS",
         ]
         self.ui.comboBox_preview_source.addItems(modes)
         logger.info(f"Initialized Preview Source with {len(modes)} modes.")
@@ -228,6 +277,44 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.lineEdit_mesh_density.setValidator(QDoubleValidator(0.0, 1.0, 3, self))
         self.ui.lineEdit_mesh_bias.setValidator(QDoubleValidator(-1.0, 1.0, 3, self))
         self.ui.lineEdit_mesh_dolly.setValidator(QDoubleValidator(0.0, 100.0, 3, self))
+
+        self.ui.comboBox_preview_scale.clear()
+        percentage_values = ["Auto"] + [
+            "250%",
+            "240%",
+            "230%",
+            "220%",
+            "210%",
+            "200%",
+            "190%",
+            "180%",
+            "170%",
+            "160%",
+            "150%",
+            "145%",
+            "140%",
+            "135%",
+            "130%",
+            "125%",
+            "120%",
+            "115%",
+            "110%",
+            "105%",
+            "100%",
+            "95%",
+            "90%",
+            "85%",
+            "80%",
+            "75%",
+            "70%",
+            "65%",
+            "60%",
+            "55%",
+            "50%",
+            "25%",
+        ]
+        self.ui.comboBox_preview_scale.addItems(percentage_values)
+        self.ui.comboBox_preview_scale.setCurrentText("Auto")
 
         self.ui.horizontalSlider_border_bias.setMinimum(0)
         self.ui.horizontalSlider_border_bias.setMaximum(100)
@@ -241,6 +328,8 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.lineEdit_jump_to.setValidator(QIntValidator(1, 999999, self))
 
         self.update_all_labels()
+
+        self.ui.action_debug.setChecked(False)
 
     def setup_slider(self, slider, label, divisor=1.0):
         def on_change(value):
@@ -274,6 +363,9 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.pushButton_play.clicked.connect(self.toggle_playback)
         self.ui.pushButton_fast_forward.clicked.connect(lambda: self.toggle_playback(fast=True))
         self.ui.spinBox_ff_speed.valueChanged.connect(self.update_playback_speed)
+
+        self.ui.comboBox_preview_scale.currentTextChanged.connect(self.on_preview_scale_changed)
+        self.ui.action_debug.triggered.connect(self.on_debug_toggled)
 
         self.ui.lineEdit_jump_to.returnPressed.connect(self.on_jump_to_clip)
 
@@ -356,7 +448,7 @@ class SplattingApp(QtWidgets.QMainWindow):
 
     def _on_playback_finished(self):
         self.play_timer.stop()
-        self.ui.pushButton_play.setText("▶")
+        self.ui.pushButton_play.setIcon(QtGui.QIcon.fromTheme("media-playback-start"))
 
     def on_loop_toggled(self, checked):
         self.playback_worker.set_loop_enabled(checked)
@@ -404,7 +496,13 @@ class SplattingApp(QtWidgets.QMainWindow):
             return
         if frame_idx is None:
             frame_idx = self.ui.horizontalSlider.value()
-        frame_idx = int(float(frame_idx))
+
+        # Handle case where frame_idx might be a string from combobox signal or other source
+        try:
+            frame_idx = int(float(frame_idx))
+        except (ValueError, TypeError):
+            frame_idx = self.ui.horizontalSlider.value()
+
         if frame_idx < 0:
             return
         params = self._get_render_params(frame_idx)
@@ -458,10 +556,15 @@ class SplattingApp(QtWidgets.QMainWindow):
 
             if not self.preview_window.isVisible():
                 self.preview_window.show()
+                self._request_render(0)
 
     def change_video(self, delta):
         new_idx = self.current_video_idx + delta
-        if self.controller.set_current_video(new_idx, self.get_params()):
+        params = self.get_params()
+        logger.debug(f"change_video called with delta={delta}, params={params}")
+        if not params:
+            params = {"strict_ffmpeg_decode": False}
+        if self.controller.set_current_video(new_idx, params):
             self.current_video_idx = new_idx
 
             self._load_sidecar()
@@ -505,6 +608,18 @@ class SplattingApp(QtWidgets.QMainWindow):
         total = self.controller.get_total_frames()
         self.ui.label_frame_info.setText(f"Frame: {frame + 1} / {total}")
         self._request_render(frame)
+
+    def on_preview_scale_changed(self, value: str):
+        if not value or value == "Auto":
+            self.preview_window.set_scale_factor(None)
+        elif value.endswith("%"):
+            scale_percent = int(value.rstrip("%"))
+            self.preview_window.set_scale_factor(scale_percent / 100.0)
+
+    def on_debug_toggled(self, checked: bool):
+        level = logging.DEBUG if checked else logging.INFO
+        logging.getLogger().setLevel(level)
+        logger.debug(f"Debug logging {'enabled' if checked else 'disabled'}")
 
     def _get_render_params(self, frame_idx=None) -> dict:
         params = self.get_params()
@@ -556,8 +671,8 @@ class SplattingApp(QtWidgets.QMainWindow):
                 self.ui.comboBox_preview_source.setCurrentIndex(idx)
 
             self.ui.lineEdit_blur_bias.setText(str(sidecar_data.get("blur_bias", 0.5)))
-            self.ui.lineEdit_mesh_extrusion.setText(str(sidecar_data.get("mesh_extrusion", 1.0)))
-            self.ui.lineEdit_mesh_density.setText(str(sidecar_data.get("mesh_density", 1.0)))
+            self.ui.lineEdit_mesh_extrusion.setText(str(sidecar_data.get("mesh_extrusion", 0.5)))
+            self.ui.lineEdit_mesh_density.setText(str(sidecar_data.get("mesh_density", 0.5)))
             self.ui.lineEdit_mesh_dolly.setText(str(sidecar_data.get("mesh_dolly", 0.0)))
 
             steering = float(params.get("view_bias", 0.0))
@@ -599,8 +714,13 @@ class SplattingApp(QtWidgets.QMainWindow):
 
     def get_params(self) -> dict:
         try:
-            return {
-                "preview_source": self.ui.comboBox_preview_source.currentText(),
+            preview_mode = self.ui.comboBox_preview_source.currentText()
+            modes_without_cross_view = ["Original (Left Eye)", "Splat Result", "Splat Result(Low)"]
+
+            logger.debug(f"get_params called, preview_mode: {preview_mode}")
+
+            params = {
+                "preview_source": preview_mode,
                 "strict_ffmpeg_decode": self.ui.checkBox_ffmpeg.isChecked(),
                 "max_disp": self.ui.horizontalSlider_disparity.value(),
                 "convergence_point": self.ui.horizontalSlider_convergence.value() / 100.0,
@@ -609,7 +729,9 @@ class SplattingApp(QtWidgets.QMainWindow):
                 "border_width": self.ui.horizontalSlider_border_width.value(),
                 "view_bias": float(self.ui.lineEdit_mesh_bias.text() or 0.0),
                 "border_bias": (self.ui.horizontalSlider_border_bias.value() - 50) / 50.0,
-                "cross_view": self.ui.checkBox_cross_view.isChecked(),
+                "cross_view": self.ui.checkBox_cross_view.isChecked()
+                if preview_mode not in modes_without_cross_view
+                else False,
                 "dilate_x": self.ui.horizontalSlider_dilate_x.value(),
                 "dilate_y": self.ui.horizontalSlider_dilate_y.value() / 2.0,
                 "blur_x": self.ui.horizontalSlider_blur_x.value(),
@@ -622,7 +744,10 @@ class SplattingApp(QtWidgets.QMainWindow):
                 "slider_convergence": self.ui.horizontalSlider_convergence.value(),
                 "slider_bias": self.ui.horizontalSlider_border_bias.value(),
             }
-        except Exception:
+            logger.debug(f"get_params returning: {params}")
+            return params
+        except Exception as e:
+            logger.error(f"get_params exception: {e}")
             return {}
 
     def on_action_calculator(self):

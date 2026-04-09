@@ -49,7 +49,7 @@ class PreviewController:
         self._depth_native_h: Optional[int] = None
 
         # Sidecar Configuration
-        self._sidecar_folder: str = "./Sidecar"
+        self._sidecar_folder: str = "./sidecar"
         self._sidecar_extension: str = ".fssidecar"
 
     def set_sidecar_extension(self, ext: str):
@@ -485,6 +485,10 @@ class PreviewController:
             "view_bias": "input_bias",
             "flip_horizontal": "flip_horizontal",
             "preview_source": "selected_depth_map",
+            "mesh_extrusion": "mesh_extrusion",
+            "mesh_density": "mesh_density",
+            "mesh_dolly": "mesh_dolly",
+            "blur_bias": "blur_bias",
         }
 
         sidecar_data = {}
@@ -509,6 +513,10 @@ class PreviewController:
             "input_bias": "view_bias",
             "flip_horizontal": "flip_horizontal",
             "selected_depth_map": "preview_source",
+            "mesh_extrusion": "mesh_extrusion",
+            "mesh_density": "mesh_density",
+            "mesh_dolly": "mesh_dolly",
+            "blur_bias": "blur_bias",
         }
 
         params = {}

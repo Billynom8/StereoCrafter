@@ -527,6 +527,12 @@ QProgressBar::chunk {
       </item>
       <item>
        <widget class="QComboBox" name="comboBox_preview_scale">
+        <property name="minimumSize">
+         <size>
+          <width>60</width>
+          <height>0</height>
+         </size>
+        </property>
         <item>
          <property name="text">
           <string>70%</string>

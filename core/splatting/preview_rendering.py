@@ -291,28 +291,37 @@ class PreviewRenderer:
 
         # Handle Mesh-based modes (Right Eye or SBS)
         if "Mesh" in preview_mode or "mesh" in preview_mode.lower():
+            self.logger.debug("Mesh mode detected, preparing mesh render")
             # CRITICAL: We want the original UN-BORDERED image for the mesh engine
             # because the mesh engine handles its own geometry.
             clean_src_np = (source_resized_original.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
             depth_np = depth_processed
+            self.logger.debug(f"Mesh render: clean_src_np shape={clean_src_np.shape}, depth_np shape={depth_np.shape}")
 
-            l_mesh, r_mesh = run_fusion_stereo(
-                image=clean_src_np,
-                depth=depth_np,
-                disparity=max_disp,
-                convergence=convergence,
-                view_bias=float(settings.get("view_bias", 0.0)),
-                dolly_zoom=float(settings.get("mesh_dolly", 0.0)),
-                extrusion_scale=float(settings.get("mesh_extrusion", 0.5)),
-                density_x=int(W_target * float(settings.get("mesh_density", 0.5))),
-                density_y=int(H_target * float(settings.get("mesh_density", 0.5))),
-            )
+            try:
+                l_mesh, r_mesh = run_fusion_stereo(
+                    image=clean_src_np,
+                    depth=depth_np,
+                    disparity=max_disp,
+                    convergence=convergence,
+                    view_bias=float(settings.get("view_bias", 0.5)),
+                    dolly_zoom=float(settings.get("mesh_dolly", 0.0)),
+                    extrusion_scale=float(settings.get("mesh_extrusion", 0.5)),
+                    density_x=int(W_target * float(settings.get("mesh_density", 0.5))),
+                    density_y=int(H_target * float(settings.get("mesh_density", 0.5))),
+                )
+                self.logger.debug(f"Mesh render succeeded: l_mesh={l_mesh.shape}, r_mesh={r_mesh.shape}")
+            except Exception as mesh_err:
+                self.logger.error(f"Mesh render failed: {mesh_err}")
+                return None
 
             if settings and settings.get("cross_view", False):
                 l_mesh, r_mesh = r_mesh, l_mesh
 
             if preview_mode == "Side-by-Side (Mesh)" or preview_mode == "Mesh Warp":
+                self.logger.debug(f"Mesh Warp: concatenating l_mesh {l_mesh.shape} + r_mesh {r_mesh.shape}")
                 final_np = np.concatenate([l_mesh, r_mesh], axis=1)
+                self.logger.debug(f"Mesh Warp: final_np shape {final_np.shape}")
                 return Image.fromarray(final_np)
             elif preview_mode == "SBS + Mesh":
                 # Create SBS-Splat (top)
@@ -339,7 +348,7 @@ class PreviewRenderer:
                 # Just the Right Eye Mesh result
                 return Image.fromarray(r_mesh)
 
-        # Render based on mode
+        # Render based on mode (non-mesh modes)
         final_tensor = self._render_by_mode(
             source_resized, right_eye, depth_processed, occlusion_mask, preview_mode, settings
         )

@@ -10,7 +10,6 @@ import argparse
 import logging
 import os
 import sys
-from typing import List, Optional
 
 # Add the current directory to the path so we can import core modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -92,7 +91,7 @@ def main():
     controller = SplattingController(sidecar_manager=sidecar_manager)
 
     # Find matching pairs
-    print(f"Scanning for matching source/depth pairs...")
+    print("Scanning for matching source/depth pairs...")
     video_list = controller.find_matching_pairs(args.source, args.depth)
 
     if not video_list:
