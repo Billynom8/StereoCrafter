@@ -1060,14 +1060,27 @@ def start_ffmpeg_pipe_process_dnxhr(
         content_height: Height of input frames
         final_output_mov_path: Output path for the MOV file
         fps: Frame rate
-        dnxhr_profile: DNxHR profile (SQ, HQ, HQX, 444)
+        dnxhr_profile: DNxHR profile (SQ, HQ, HQX, 444, LB or DNxH-LB, DNxH-SQ, DNxH-HX, DNxH-HQS)
 
     Returns:
         The subprocess.Popen instance
     """
-    prof = {"SQ": "dnxhr_sq", "HQ": "dnxhr_hq", "HQX": "dnxhr_hqx", "444": "dnxhr_444"}.get(
-        dnxhr_profile.strip().upper()[:3], "dnxhr_hqx"
-    )
+    # Handle both old format (SQ, HQ, HQX, 444, LB) and new format (DNxH-LB, DNxH-SQ, DNxH-HX, DNxH-HQS)
+    profile_key = dnxhr_profile.strip().upper()
+    if "-" in profile_key:
+        # New format: DNxH-LB -> LB, DNxH-HX -> HX, etc.
+        profile_key = profile_key.split("-")[-1]
+
+    prof_map = {
+        "LB": "dnxhr_lb",
+        "SQ": "dnxhr_sq",
+        "HQ": "dnxhr_hq",
+        "HX": "dnxhr_hqx",  # HX maps to HQX
+        "HQS": "dnxhr_hqx",  # HQS maps to HQX
+        "HQX": "dnxhr_hqx",
+        "444": "dnxhr_444",
+    }
+    prof = prof_map.get(profile_key, "dnxhr_hqx")
     pix = "yuv444p10le" if prof == "dnxhr_444" else "yuv422p10le"
     cmd = [
         "ffmpeg",

@@ -26,9 +26,11 @@ StereoCrafter/
 │   │   ├── preview_canvas_window.py # Preview window
 │   │   ├── preview_buffer.py    # Frame caching
 │   │   ├── preview_controller.py # Qt preview controller
-│   │   ├── encoding_settings.py  # Encoding dialog
+│   │   ├── encoding_settings.py  # Tkinter encoding dialog
+│   │   ├── qt_encoding_settings.py # Qt encoding dialog (PySide6)
 │   │   ├── dnd_support.py        # Drag-and-drop support
-│   │   ├── splatting_ui.py       # Qt UI definition (generated)
+│   │   ├── splatting_ui.py       # Qt UI definition (generated from Qt Designer)
+│   │   ├── encode_ui.py          # Qt encoding dialog UI (generated from Qt Designer)
 │   │   └── workers/              # Background workers
 │   │       ├── __init__.py
 │   │       ├── preview_render_worker.py # Qt render worker
@@ -129,7 +131,7 @@ StereoCrafter/
 ├── source_video/            # Sample/test videos
 ├── weights/                 # Model weights directory
 ├── splatting_gui.py         # Primary Tkinter GUI (splatting) ~4000+ lines
-├── splatting_gui_qt.py      # PySide6 GUI (splatting) ~775 lines, includes batch processing
+├── splatting_gui_qt.py      # PySide6 Qt GUI (splatting) ~1037 lines, includes batch processing, preview scaling, debug logging
 ├── merging_gui.py           # Tkinter GUI (merging) ~2453 lines
 ├── inpainting_gui.py        # Tkinter GUI (inpainting) ~3935 lines
 ├── depthcrafter_gui_seg.py  # Tkinter GUI (depth generation) ~3026 lines
@@ -304,4 +306,4 @@ from core.splatting import FusionSidecarGenerator
 
 ---
 
-*Structure analysis: 2026-04-07*
+*Structure analysis: 2026-04-09*

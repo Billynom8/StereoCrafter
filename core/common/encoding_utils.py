@@ -6,7 +6,27 @@ logger = logging.getLogger(__name__)
 
 QUALITY_PRESETS = ("Fastest", "Faster", "Fast", "Medium", "Slow", "Slower", "Slowest")
 
-CODEC_OPTIONS = ("Auto", "H.264", "H.265")
+CODEC_OPTIONS = ("H.264", "H.265", "DNxH-LB", "DNxH-SQ", "DNxH-HX", "DNxH-HQS", "DNxH-444")
+
+CONTAINER_OPTIONS = {
+    "H.264": ("MP4", "MKV", "MOV", "WEBM"),
+    "H.265": ("MP4", "MKV", "MOV", "WEBM"),
+    "DNxH-LB": ("MOV", "MXF"),
+    "DNxH-SQ": ("MOV", "MXF"),
+    "DNxH-HX": ("MOV", "MXF"),
+    "DNxH-HQS": ("MOV", "MXF"),
+    "DNxH-444": ("MOV", "MXF"),
+}
+
+ENCODER_OPTIONS = {
+    "H.264": ("Auto", "Force CPU"),
+    "H.265": ("Auto", "Force CPU"),
+    "DNxH-LB": ("Auto", "Force CPU"),
+    "DNxH-SQ": ("Auto", "Force CPU"),
+    "DNxH-HX": ("Auto", "Force CPU"),
+    "DNxH-HQS": ("Auto", "Force CPU"),
+    "DNxH-444": ("Auto", "Force CPU"),
+}
 
 CPU_PRESET_MAP = {
     "Fastest": "ultrafast",
@@ -30,8 +50,6 @@ NVENC_PRESET_MAP = {
 
 CPU_TUNE_OPTIONS = ("None", "Film", "Grain", "Animation", "Still Image", "PSNR", "SSIM", "Fast Decode", "Zero Latency")
 
-ENCODER_OPTIONS = ("Auto", "Force CPU")
-
 DEFAULT_ENCODING_CONFIG = {
     "codec": "H.265",
     "encoder": "Auto",
@@ -50,37 +68,41 @@ def get_encoder_codec(codec: str = "H.265", force_10bit: bool = False, encoder: 
     """Determine the encoder codec based on settings.
 
     Args:
-        codec: "Auto", "H.264", or "H.265"
+        codec: "H.264", "H.265", "DNxH-LB", "DNxH-SQ", "DNxH-HX", or "DNxH-HQS"
         force_10bit: Whether to use 10-bit encoding
         encoder: "Auto" (use NVENC if available) or "Force CPU"
 
     Returns:
-        Codec string (e.g., "h264_nvenc", "libx264", "hevc_nvenc", "libx265")
+        Codec string (e.g., "h264_nvenc", "libx264", "hevc_nvenc", "libx265", "dnxhdenc")
     """
-    use_nvenc = encoder != "Force CPU"
+    use_nvenc = encoder != "Force CPU" and CUDA_AVAILABLE
+
+    # DNxHR variants (both old "DNxHR" and new "DNxH-*" formats)
+    if codec == "DNxHR" or codec.startswith("DNxH"):
+        return "dnxhdenc"
 
     if codec == "H.264":
         if force_10bit:
             logger.warning("H.264 does not support 10-bit encoding well. Forcing H.265.")
-            codec = "H.265"
-        if use_nvenc and CUDA_AVAILABLE:
+            return get_encoder_codec("H.265", True, encoder)
+        if use_nvenc:
             return "h264_nvenc"
         return "libx264"
 
-    if codec == "H.265" or codec == "Auto":
+    if codec == "H.265":
         if force_10bit:
-            if use_nvenc and CUDA_AVAILABLE:
+            if use_nvenc:
                 return "hevc_nvenc"
             return "libx265"
         else:
-            if use_nvenc and CUDA_AVAILABLE:
-                return "h264_nvenc" if codec == "Auto" else "hevc_nvenc"
+            if use_nvenc:
+                return "hevc_nvenc"
             return "libx265"
 
-    if use_nvenc and CUDA_AVAILABLE:
-        return "hevc_nvenc" if force_10bit else "h264_nvenc"
-
-    return "libx265" if force_10bit else "libx264"
+    # Default fallback
+    if use_nvenc:
+        return "hevc_nvenc"
+    return "libx265"
 
 
 def quality_to_preset(quality: str, is_nvenc: bool) -> str:

@@ -150,6 +150,7 @@ class Ui_Dialog(object):
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
         self.comboBox_look_ahead_frames = QComboBox(self.groupBox_nvenco_options)
         self.comboBox_look_ahead_frames.setObjectName(u"comboBox_look_ahead_frames")
+        self.comboBox_look_ahead_frames.setEnabled(False)
         self.comboBox_look_ahead_frames.setMinimumSize(QSize(60, 0))
         self.comboBox_look_ahead_frames.setMaximumSize(QSize(60, 16777215))
 

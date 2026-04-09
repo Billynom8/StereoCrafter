@@ -2,6 +2,7 @@ import sys
 import logging
 import json
 import os
+import shutil
 from PySide6 import QtWidgets, QtGui, QtCore
 from PySide6.QtGui import QDoubleValidator, QIntValidator
 from core.ui.splatting_ui import Ui_MainWindow
@@ -90,6 +91,7 @@ class SplattingApp(QtWidgets.QMainWindow):
         self._wiggle_left_img = None
         self._wiggle_right_img = None
         self._auto_save_sidecar = False
+        self._encoding_config = {}
 
         self._setup_workers()
         self._setup_playback_timer()
@@ -176,6 +178,8 @@ class SplattingApp(QtWidgets.QMainWindow):
         config["slider_bias"] = self.ui.horizontalSlider_border_bias.value()
         config["preview_scale"] = self.ui.comboBox_preview_scale.currentText()
         config["debug_logging"] = self.ui.action_debug.isChecked()
+        config["auto_update_sidecar"] = self.ui.action_auto_update_sidecar.isChecked()
+        config["encoding"] = self._encoding_config
 
         try:
             with open("config_splat.splatcfg", "w") as f:
@@ -239,6 +243,8 @@ class SplattingApp(QtWidgets.QMainWindow):
                         self.on_preview_scale_changed(preview_scale)
 
                 self.ui.action_debug.setChecked(config.get("debug_logging", False))
+                self.ui.action_auto_update_sidecar.setChecked(config.get("auto_update_sidecar", False))
+                self._encoding_config = config.get("encoding", {})
 
             finally:
                 self.ui.centralwidget.blockSignals(False)
@@ -366,38 +372,6 @@ class SplattingApp(QtWidgets.QMainWindow):
 
         self.ui.comboBox_preview_scale.currentTextChanged.connect(self.on_preview_scale_changed)
         self.ui.action_debug.triggered.connect(self.on_debug_toggled)
-
-        self.ui.lineEdit_jump_to.returnPressed.connect(self.on_jump_to_clip)
-
-        self.ui.pushButton_loop_toggle.toggled.connect(self.on_loop_toggled)
-
-        mappings = [
-            (self.ui.horizontalSlider_disparity, self.ui.label_disparity_value, 1.0),
-            (self.ui.horizontalSlider_convergence, self.ui.label_convergence_value, 100.0),
-            (self.ui.horizontalSlider_gamma, self.ui.label_gamma_value, 100.0),
-            (self.ui.horizontalSlider_border_width, self.ui.label_border_width_value, 1.0),
-            (self.ui.horizontalSlider_dilate_x, self.ui.label_dilate_x_value, 1.0),
-            (self.ui.horizontalSlider_dilate_y, self.ui.label_dilate_y_value, 1.0),
-            (self.ui.horizontalSlider_blur_x, self.ui.label_blue_x_value, 1.0),
-            (self.ui.horizontalSlider_blur_y, self.ui.label_blur_y_value, 1.0),
-        ]
-
-        for slider, label, div in mappings:
-            self.setup_slider(slider, label, div)
-
-        self.ui.horizontalSlider_border_bias.valueChanged.connect(self.on_bias_change)
-
-        self.ui.comboBox_preview_source.currentIndexChanged.connect(self._request_render)
-        self.ui.comboBox_border.currentIndexChanged.connect(self._request_render)
-        self.ui.checkBox_cross_view.stateChanged.connect(
-            lambda state: (logger.debug(f"checkBox_cross_view toggled: state={state}"), self._request_render())
-        )
-
-        self.ui.lineEdit_blur_bias.textChanged.connect(self._request_render)
-        self.ui.lineEdit_mesh_extrusion.textChanged.connect(self._request_render)
-        self.ui.lineEdit_mesh_density.textChanged.connect(self._request_render)
-        self.ui.lineEdit_mesh_bias.textChanged.connect(self._request_render)
-
         self.ui.action_calculator.triggered.connect(self.on_action_calculator)
         self.ui.action_load_settings.triggered.connect(self.on_load_settings)
         self.ui.action_save.triggered.connect(self.on_save_settings)
@@ -405,6 +379,14 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.action_fsexport_to_sidecar.triggered.connect(self.on_fsexport_to_sidecar)
         self.ui.action_update_from_sidecar.triggered.connect(self.on_update_from_sidecar)
         self.ui.action_auto_update_sidecar.triggered.connect(self.on_auto_update_sidecar)
+        self.ui.action_encoder.triggered.connect(self.on_encoder_settings)
+        self.ui.action_guide.triggered.connect(self.on_user_guide)
+        self.ui.action_about.triggered.connect(self.on_about)
+        self.ui.action_exit.triggered.connect(self.close)
+
+        # Unconnected menu actions - add handlers
+        self.ui.action_restore_from_finished.triggered.connect(self.on_restore_finished)
+        self.ui.action_load_fsexport.triggered.connect(self.on_load_fsexport)
 
         self.ui.pushButton_start.clicked.connect(self.on_start_processing)
         self.ui.pushButton_stop.clicked.connect(self.on_stop_processing)
@@ -642,6 +624,9 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.controller.save_sidecar(params)
 
     def _load_sidecar(self):
+        if not self._auto_save_sidecar:
+            return
+
         sidecar_data = self.controller.load_sidecar()
         if not sidecar_data:
             return
@@ -737,8 +722,8 @@ class SplattingApp(QtWidgets.QMainWindow):
                 "blur_x": self.ui.horizontalSlider_blur_x.value(),
                 "blur_y": self.ui.horizontalSlider_blur_y.value(),
                 "blur_bias": float(self.ui.lineEdit_blur_bias.text() or 0.5),
-                "mesh_extrusion": float(self.ui.lineEdit_mesh_extrusion.text() or 1.0),
-                "mesh_density": float(self.ui.lineEdit_mesh_density.text() or 1.0),
+                "mesh_extrusion": float(self.ui.lineEdit_mesh_extrusion.text() or 0.5),
+                "mesh_density": float(self.ui.lineEdit_mesh_density.text() or 0.5),
                 "mesh_dolly": float(self.ui.lineEdit_mesh_dolly.text() or 0.0),
                 "slider_disparity": self.ui.horizontalSlider_disparity.value(),
                 "slider_convergence": self.ui.horizontalSlider_convergence.value(),
@@ -866,6 +851,158 @@ class SplattingApp(QtWidgets.QMainWindow):
 
     def on_auto_update_sidecar(self, checked):
         self._auto_save_sidecar = checked
+        # Also use this to control auto-loading sidecar when video changes
+        self.ui.action_auto_update_sidecar.setChecked(checked)
+
+    def on_encoder_settings(self):
+        from core.ui.qt_encoding_settings import QtEncodingSettingsDialog
+
+        dialog = QtEncodingSettingsDialog(self, app_config={"encoding": self._encoding_config})
+        if dialog.exec():
+            self._encoding_config = dialog.get_config()
+            self.save_config()
+            self.ui.label_status.setText("Encoding settings saved")
+
+    def on_user_guide(self):
+        import webbrowser
+
+        webbrowser.open("https://github.com/Teng0/StereoCrafter")
+
+    def on_about(self):
+        QtWidgets.QMessageBox.about(
+            self,
+            "About StereoCrafter",
+            "StereoCrafter Splatting (Qt)\n\n"
+            "A tool for generating right-eye stereo views from source video and depth maps.\n"
+            "Based on PyTorch, Diffusers, and Qt.\n\n"
+            "(C) 2024 Some Rights Reserved",
+        )
+
+    def on_restore_finished(self):
+        """Moves all files from 'finished' folders back to their original input folders."""
+        from core.common.file_organizer import move_files_to_finished
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Restore Finished Files",
+            "Are you sure you want to move all files from 'finished' folders back to their input directories?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply == QtWidgets.QMessageBox.No:
+            return
+
+        source_clip_dir = self.ui.lineEdit_input_source.text()
+        depth_map_dir = self.ui.lineEdit_input_depth.text()
+
+        if not (os.path.isdir(source_clip_dir) and os.path.isdir(depth_map_dir)):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Restore Error",
+                "Restore 'finished' operation is only applicable when Input Source Clips and Input Depth Maps are set to directories (batch mode).",
+            )
+            return
+
+        files_to_move = []
+        finished_source_folder = os.path.join(source_clip_dir, "finished")
+        finished_depth_folder = os.path.join(depth_map_dir, "finished")
+
+        if os.path.isdir(finished_source_folder):
+            for filename in os.listdir(finished_source_folder):
+                src_path = os.path.join(finished_source_folder, filename)
+                if os.path.isfile(src_path):
+                    files_to_move.append((src_path, source_clip_dir))
+
+        if os.path.isdir(finished_depth_folder):
+            for filename in os.listdir(finished_depth_folder):
+                src_path = os.path.join(finished_depth_folder, filename)
+                if os.path.isfile(src_path):
+                    files_to_move.append((src_path, depth_map_dir))
+
+        if not files_to_move:
+            QtWidgets.QMessageBox.information(
+                self, "Restore Complete", "No files found in 'finished' folders to restore."
+            )
+            return
+
+        moved, failed, _ = move_files_to_finished(files_to_move, logger)
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Restore Complete",
+            f"Finished files restoration attempted.\n{moved} files moved.\n{failed} errors occurred.",
+        )
+        if reply == QtWidgets.QMessageBox.No:
+            return
+
+        source_clip_dir = self.ui.lineEdit_input_source.text()
+        depth_map_dir = self.ui.lineEdit_input_depth.text()
+
+        if not (os.path.isdir(source_clip_dir) and os.path.isdir(depth_map_dir)):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Restore Error",
+                "Restore 'finished' operation is only applicable when Input Source Clips and Input Depth Maps are set to directories (batch mode).",
+            )
+            return
+
+        finished_source_folder = os.path.join(source_clip_dir, "finished")
+        finished_depth_folder = os.path.join(depth_map_dir, "finished")
+
+        restored_count = 0
+        errors_count = 0
+
+        if os.path.isdir(finished_source_folder):
+            logger.info(f"Restoring source clips from: {finished_source_folder}")
+            for filename in os.listdir(finished_source_folder):
+                src_path = os.path.join(finished_source_folder, filename)
+                dest_path = os.path.join(source_clip_dir, filename)
+                if os.path.isfile(src_path):
+                    try:
+                        shutil.move(src_path, dest_path)
+                        restored_count += 1
+                    except Exception as e:
+                        errors_count += 1
+                        logger.error(f"Error moving source clip '{filename}': {e}")
+
+        if os.path.isdir(finished_depth_folder):
+            logger.info(f"Restoring depth maps from: {finished_depth_folder}")
+            for filename in os.listdir(finished_depth_folder):
+                src_path = os.path.join(finished_depth_folder, filename)
+                dest_path = os.path.join(depth_map_dir, filename)
+                if os.path.isfile(src_path):
+                    try:
+                        shutil.move(src_path, dest_path)
+                        restored_count += 1
+                    except Exception as e:
+                        errors_count += 1
+                        logger.error(f"Error moving depth map '{filename}': {e}")
+
+        QtWidgets.QMessageBox.information(
+            self,
+            "Restore Complete",
+            f"Finished files restoration attempted.\n{restored_count} files moved.\n{errors_count} errors occurred.",
+        )
+
+    def on_load_fsexport(self):
+        from core.splatting.fusion_export import FusionSidecarGenerator
+
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load Fusion Export", "", "Fusion Export (*.fsexport);;All files (*)"
+        )
+        if not filename:
+            return
+        try:
+            generator = FusionSidecarGenerator()
+            data = generator.load_fsexport(filename)
+            if data:
+                self._apply_config_to_ui(data)
+                self.ui.label_status.setText(f"Loaded Fusion export: {filename}")
+            else:
+                QtWidgets.QMessageBox.warning(self, "Load Failed", "Could not load Fusion export file.")
+        except Exception as e:
+            logger.error(f"Failed to load fsexport: {e}")
+            QtWidgets.QMessageBox.warning(self, "Load Error", f"Failed to load: {e}")
 
     def _apply_config_to_ui(self, config: dict):
         """Apply loaded config to UI widgets."""

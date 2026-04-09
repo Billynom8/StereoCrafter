@@ -10,11 +10,14 @@ StereoCrafter is a collection of standalone GUI/CLI applications for stereo (3D)
 
 **Key Characteristics:**
 - Multiple independent GUI applications (Tkinter-based) sharing a common `core/` library
-- One PySide6 (Qt) alternative GUI for splatting (`splatting_gui_qt.py`)
+- Two PySide6 (Qt) alternatives: `splatting_gui_qt.py` (primary) and `depthcrafter_gui_seg.py` with Qt widgets
 - Headless CLI entry point (`splat_cli.py`)
 - Batch processing with background threading and queue-based progress reporting
 - GPU-accelerated video processing via PyTorch/CUDA
 - Sidecar-based configuration persistence (JSON files alongside media)
+- Preview scaling with percentage options ("Auto" + 250% → 25%)
+- Debug logging toggleable via menu
+- DNxHR encoding with multiple profile options (DNxH-LB, DNxH-SQ, DNxH-HX, DNxH-HQS, DNxH-444)
 
 ## Layers
 
@@ -38,7 +41,7 @@ StereoCrafter is a collection of standalone GUI/CLI applications for stereo (3D)
 
 **4. UI / Presentation Layer** - GUI components
 - Location: `core/ui/` (8 modules + `workers/` subpackage)
-- Contains: `ThemeManager`, `VideoPreviewer`, `PreviewCanvasWindow`, `EncodingSettingsDialog`, `PreviewRenderWorker`, `PlaybackWorker`
+- Contains: `ThemeManager`, `VideoPreviewer`, `PreviewCanvasWindow`, `EncodingSettingsDialog`, `QtEncodingSettingsDialog`, `PreviewRenderWorker`, `PlaybackWorker`
 - Depends on: Tkinter/ttk, PySide6, PIL
 - Used by: Application entry points
 
@@ -123,9 +126,9 @@ StereoCrafter is a collection of standalone GUI/CLI applications for stereo (3D)
 
 **`splatting_gui_qt.py`** - PySide6 alternative GUI for splatting
 - Triggers: `_RUN_Splatting_qt_GUI.bat`
-- Class: `SplattingApp(QMainWindow)` - ~775 lines
-- Responsibilities: Interactive preview with wigglegram, real-time rendering, batch processing, sidecar management
-- Uses: `Ui_MainWindow` (from `core/ui/splatting_ui.py`, Qt Designer generated), `PreviewController`, `PreviewRenderWorker`, `PlaybackWorker`, `SplattingController`, `ProcessingSettings`
+- Class: `SplattingApp(QMainWindow)` - ~1037 lines
+- Responsibilities: Interactive preview with wigglegram, real-time rendering, batch processing, sidecar management, preview scaling, debug logging toggle
+- Uses: `Ui_MainWindow` (from `core/ui/splatting_ui.py`, Qt Designer generated), `PreviewController`, `PreviewRenderWorker`, `PlaybackWorker`, `SplattingController`, `ProcessingSettings`, `QtEncodingSettingsDialog`
 
 **`merging_gui.py`** - Tkinter GUI for merging inpainted + original video
 - Triggers: `_RUN_Merging_GUI.bat`
@@ -240,8 +243,8 @@ StereoCrafter is a collection of standalone GUI/CLI applications for stereo (3D)
 
 **GPU Management:** `core/common/gpu_utils.py` provides `check_cuda_availability()`, `release_cuda_memory()`; explicit `gc.collect()` calls between heavy operations
 
-**Encoding:** Centralized in `core/common/encoding_utils.py` with support for H.264, H.265, DNxHR; configurable CRF, quality presets, NVENC options
+**Encoding:** Centralized in `core/common/encoding_utils.py` with support for H.264, H.265, and DNxHR profiles (DNxH-LB, DNxH-SQ, DNxH-HX, DNxH-HQS, DNxH-444); configurable CRF, quality presets, NVENC options; dynamic container/encoder options based on selected codec
 
 ---
 
-*Architecture analysis: 2026-04-07*
+*Architecture analysis: 2026-04-09*

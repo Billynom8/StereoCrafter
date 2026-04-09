@@ -11,7 +11,7 @@
   - `depthcrafter_gui_seg.py` — 3,026 lines
   - `inpainting_gui.py` — 3,935 lines
   - `merging_gui.py` — large file
-  - `splatting_gui_qt.py` — large file
+  - `splatting_gui_qt.py` — 1,037 lines (new Qt alternative, smaller but still growing)
 - **Impact:** High — extremely difficult to maintain, test, or refactor. Any change risks breaking unrelated functionality.
 - **Fix approach:** Extract business logic into separate service/controller modules (partial refactoring already started in `core/`). Keep GUI files thin — only UI rendering and event handling.
 
@@ -164,6 +164,12 @@
 - **Files:** `core/splatting/render_processor.py`, `core/common/video_io.py`, `merging_gui.py`, `core/ui/preview_controller.py`
 - **Why fragile:** Inconsistent error handling, pipe management, and encoding flag detection across files
 - **Safe modification:** Create a shared `FfmpegProcess` wrapper class in `core/common/`
+
+### DNxHR Profile Handling in Encoding Pipeline
+- **Issue:** Encoding system updated with DNxH-* codec options but DNxHR mode still uses separate code path (`start_ffmpeg_pipe_process_dnxhr`)
+- **Files:** `core/common/video_io.py`, `core/common/encoding_utils.py`, `core/splatting/render_processor.py`
+- **Impact:** Medium — dual paths for DNxHR encoding could diverge; new codec options (DNxH-LB, DNxH-SQ, etc.) map to dnxhdenc but DNxHR (legacy) also maps to dnxhdenc
+- **Safe modification:** Ensure both paths produce equivalent output; consider consolidating to single encoding path
 
 ### Dependency Submodules
 - **Issue:** `dependency/` directory contains git submodules (Forward-Warp, DepthCrafter) and vendored code
