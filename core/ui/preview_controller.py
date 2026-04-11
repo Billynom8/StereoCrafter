@@ -364,6 +364,10 @@ class PreviewController:
             depth_tensor = torch.from_numpy(depth_batch.astype("float32")).permute(0, 3, 1, 2)
             logger.debug(f"Source tensor shape: {src_tensor.shape}, Depth tensor shape: {depth_tensor.shape}")
 
+            # Handle multi-channel depth (convert RGB to single channel if needed)
+            if depth_tensor.shape[1] > 1:
+                depth_tensor = depth_tensor[:, 0:1, :, :]  # Take first channel only
+
             if depth_batch.dtype == "uint8":
                 depth_tensor = depth_tensor / 255.0
 

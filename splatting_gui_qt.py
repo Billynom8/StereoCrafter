@@ -3,9 +3,23 @@ import logging
 import json
 import os
 import shutil
+import struct
+import numpy as np
+import cv2
 from PySide6 import QtWidgets, QtGui, QtCore
 from PySide6.QtGui import QDoubleValidator, QIntValidator
 from core.ui.splatting_ui import Ui_MainWindow
+from core.ui.splatting_widgets import (
+    InputOutputWidget,
+    PreviewControlsWidget,
+    StereoProjectionWidget,
+    DepthPreprocessingWidget,
+    SplattingSettingsWidget,
+    ProcessingResolutionWidget,
+    ProcessingControlsWidget,
+    VideoListWidget,
+    DevToolsWidget,
+)
 from core.ui.preview_controller import PreviewController
 from core.splatting.controller import SplattingController
 from core.splatting.batch_processing import ProcessingSettings
@@ -13,7 +27,7 @@ from core.ui.workers.preview_render_worker import PreviewRenderWorker
 from core.ui.workers.playback_worker import PlaybackWorker
 from PIL.ImageQt import ImageQt
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -29,19 +43,16 @@ class PreviewWindow(QtWidgets.QDialog):
         self.resize(800, 600)
         self._main_window = parent
         self._current_pixmap = None
-        self._scale_factor = None  # None = auto (fit to window), float = fixed scale
+        self._scale_factor = None
 
     def set_scale_factor(self, factor):
-        """Set a fixed scale factor (e.g., 1.0 = 100%, 0.5 = 50%). None for auto-fit."""
         self._scale_factor = factor
         if self._current_pixmap:
             self._update_display()
 
     def _get_scaled_size(self):
-        """Calculate target size based on scale factor or auto-fit to window."""
         if self._current_pixmap is None:
             return self.label.size()
-
         if self._scale_factor is None:
             return self.label.size()
         else:
@@ -50,7 +61,6 @@ class PreviewWindow(QtWidgets.QDialog):
             return QtCore.QSize(w, h)
 
     def _update_display(self):
-        """Update label with current pixmap scaled appropriately."""
         if self._current_pixmap:
             target_size = self._get_scaled_size()
             self.label.setPixmap(
@@ -58,7 +68,6 @@ class PreviewWindow(QtWidgets.QDialog):
             )
 
     def closeEvent(self, event):
-        """Stop wigglegram timer when preview window is closed."""
         if self._main_window and hasattr(self._main_window, "_wiggle_timer"):
             self._main_window._wiggle_timer.stop()
         event.accept()
@@ -84,8 +93,7 @@ class SplattingApp(QtWidgets.QMainWindow):
 
         self.current_video_idx = 0
 
-        # Wigglegram animation state
-        self._wiggle_state = True  # True = show left, False = show right
+        self._wiggle_state = True
         self._wiggle_timer = QtCore.QTimer(self)
         self._wiggle_timer.timeout.connect(self._wiggle_step)
         self._wiggle_left_img = None
@@ -93,12 +101,24 @@ class SplattingApp(QtWidgets.QMainWindow):
         self._auto_save_sidecar = False
         self._encoding_config = {}
 
+        self._init_widgets()
         self._setup_workers()
         self._setup_playback_timer()
         self._setup_processing()
-        self.connect_signals()
+        self._connect_signals()
         self.init_ui_defaults()
         self.load_config()
+
+    def _init_widgets(self):
+        self.io_widget = InputOutputWidget(self.ui, self)
+        self.preview_widget = PreviewControlsWidget(self.ui, self)
+        self.stereo_widget = StereoProjectionWidget(self.ui, self)
+        self.depth_widget = DepthPreprocessingWidget(self.ui, self)
+        self.splatting_widget = SplattingSettingsWidget(self.ui, self)
+        self.resolution_widget = ProcessingResolutionWidget(self.ui, self)
+        self.processing_widget = ProcessingControlsWidget(self.ui, self)
+        self.video_list_widget = VideoListWidget(self.ui, self)
+        self.dev_tools_widget = DevToolsWidget(self.ui, self)
 
     def _setup_workers(self):
         self.render_thread = QtCore.QThread(self)
@@ -135,20 +155,22 @@ class SplattingApp(QtWidgets.QMainWindow):
             return
         if progress == "finished":
             self._processing_timer.stop()
-            self.ui.label_status.setText("Processing complete")
+            self.processing_widget.set_status("Processing complete")
             self._enable_inputs(True)
             return
         if isinstance(progress, tuple):
             msg_type = progress[0]
             if msg_type == "status":
-                self.ui.label_status.setText(progress[1])
+                self.processing_widget.set_status(progress[1])
             elif msg_type == "total":
-                self.ui.progressBar.setMaximum(progress[1])
-                self.ui.progressBar.setValue(0)
+                self.processing_widget.set_progress_max(progress[1])
+                self.processing_widget.set_progress(0)
             elif msg_type == "processed":
-                self.ui.progressBar.setValue(progress[1])
+                self.processing_widget.set_progress(progress[1])
             elif msg_type == "update_info":
-                self.ui.label_info_filename_value.setText(progress[1].get("filename", ""))
+                self.processing_widget.set_filename(progress[1].get("filename", ""))
+            elif msg_type == "diagnostic_capture":
+                self._handle_diagnostic_capture(progress[1])
 
     def closeEvent(self, event):
         self.save_config()
@@ -163,20 +185,20 @@ class SplattingApp(QtWidgets.QMainWindow):
 
     def save_config(self):
         config = self.get_params()
-        config["input_source"] = self.ui.lineEdit_input_source.text()
-        config["input_depth"] = self.ui.lineEdit_input_depth.text()
-        config["output_splatted"] = self.ui.lineEdit_output_splatted.text()
-        config["sidecar_path"] = self.ui.lineEdit_inout_sidecar.text()
-        config["multi_map"] = self.ui.checkBox_multi_map.isChecked()
-        config["low_width"] = str(self.ui.lineEdit_low_width.text())
-        config["low_height"] = str(self.ui.lineEdit_low_height.text())
-        config["process_length"] = str(self.ui.lineEdit_process_length.text())
-        config["slider_disparity"] = self.ui.horizontalSlider_disparity.value()
-        config["slider_convergence"] = self.ui.horizontalSlider_convergence.value()
-        config["slider_gamma"] = self.ui.horizontalSlider_gamma.value()
-        config["slider_border_width"] = self.ui.horizontalSlider_border_width.value()
-        config["slider_bias"] = self.ui.horizontalSlider_border_bias.value()
-        config["preview_scale"] = self.ui.comboBox_preview_scale.currentText()
+        config["input_source"] = self.io_widget.get_source_path()
+        config["input_depth"] = self.io_widget.get_depth_path()
+        config["output_splatted"] = self.io_widget.get_output_path()
+        config["sidecar_path"] = self.io_widget.get_sidecar_path()
+        config["multi_map"] = self.io_widget.is_multi_map()
+        config["low_width"] = str(self.resolution_widget.get_low_width())
+        config["low_height"] = str(self.resolution_widget.get_low_height())
+        config["process_length"] = str(self.splatting_widget.get_process_length())
+        config["slider_disparity"] = self.stereo_widget.get_disparity()
+        config["slider_convergence"] = self.stereo_widget.get_convergence()
+        config["slider_gamma"] = self.stereo_widget.get_gamma()
+        config["slider_border_width"] = self.stereo_widget.get_border_width()
+        config["slider_bias"] = self.stereo_widget.get_border_bias()
+        config["preview_scale"] = self.preview_widget.get_scale()
         config["debug_logging"] = self.ui.action_debug.isChecked()
         config["auto_update_sidecar"] = self.ui.action_auto_update_sidecar.isChecked()
         config["encoding"] = self._encoding_config
@@ -196,51 +218,40 @@ class SplattingApp(QtWidgets.QMainWindow):
             with open("config_splat.splatcfg", "r") as f:
                 config = json.load(f)
 
-            self.ui.lineEdit_input_source.setText(config.get("input_source", "./workspace/clips"))
-            self.ui.lineEdit_input_depth.setText(config.get("input_depth", "./workspace/depth"))
-            self.ui.lineEdit_output_splatted.setText(config.get("output_splatted", "./workspace/splat"))
-            self.ui.lineEdit_inout_sidecar.setText(str(config.get("sidecar_path", "./workspace/sidecar")))
-            self.ui.checkBox_multi_map.setChecked(config.get("multi_map", False))
-            self.ui.lineEdit_low_width.setText(str(config.get("low_width", "640")))
-            self.ui.lineEdit_low_height.setText(str(config.get("low_height", "320")))
-            self.ui.lineEdit_process_length.setText(str(config.get("process_length", "0")))
-            self.ui.lineEdit_mesh_extrusion.setText(str(config.get("mesh_extrusion", "0.5")))
-            self.ui.lineEdit_mesh_density.setText(str(config.get("mesh_density", "0.5")))
-            self.ui.lineEdit_mesh_bias.setText(str(config.get("mesh_bias", "0.5")))
-            self.ui.lineEdit_mesh_dolly.setText(str(config.get("mesh_dolly", "0.0")))
+            self.io_widget.set_source_path(config.get("input_source", "./workspace/clips"))
+            self.io_widget.set_depth_path(config.get("input_depth", "./workspace/depth"))
+            self.io_widget.set_output_path(config.get("output_splatted", "./workspace/splat"))
+            self.io_widget.set_sidecar_path(str(config.get("sidecar_path", "./workspace/sidecar")))
+            self.io_widget.set_multi_map(config.get("multi_map", False))
+            self.resolution_widget.set_low_width(config.get("low_width", 640))
+            self.resolution_widget.set_low_height(config.get("low_height", 320))
+            self.splatting_widget.set_process_length(config.get("process_length", 0))
+            self.splatting_widget.set_mesh_extrusion(config.get("mesh_extrusion", 0.5))
+            self.splatting_widget.set_mesh_density(config.get("mesh_density", 0.5))
+            self.splatting_widget.set_mesh_bias(config.get("mesh_bias", 0.5))
+            self.splatting_widget.set_mesh_dolly(config.get("mesh_dolly", 0.0))
 
             self.ui.centralwidget.blockSignals(True)
             try:
-                self.ui.horizontalSlider_disparity.setValue(config.get("slider_disparity", 35))
-                self.ui.horizontalSlider_convergence.setValue(config.get("slider_convergence", 100))
-                self.ui.horizontalSlider_gamma.setValue(config.get("slider_gamma", 99))
-                self.ui.horizontalSlider_border_width.setValue(config.get("slider_border_width", 0))
-                self.ui.horizontalSlider_border_bias.setValue(config.get("slider_bias", 50))
-                self.ui.checkBox_cross_view.setChecked(config.get("cross_view", False))
 
                 def val(key, default):
                     return int(float(config.get(key, default)))
 
-                self.ui.horizontalSlider_disparity.setValue(val("max_disp", 35))
-                self.ui.horizontalSlider_convergence.setValue(int(float(config.get("convergence_point", 1.0)) * 100))
-                self.ui.horizontalSlider_gamma.setValue(int(float(config.get("gamma", 1.0)) * 100))
-                self.ui.horizontalSlider_border_width.setValue(val("border_width", 0))
-                self.ui.horizontalSlider_border_bias.setValue(int(float(config.get("border_bias", 0.5)) * 100))
-                self.ui.horizontalSlider_dilate_x.setValue(val("dilate_x", 12))
-                self.ui.horizontalSlider_dilate_y.setValue(int(float(config.get("dilate_y", 3)) * 2.0))
-                self.ui.horizontalSlider_blur_x.setValue(val("blur_x", 5))
-                self.ui.horizontalSlider_blur_y.setValue(val("blur_y", 5))
+                self.stereo_widget.set_disparity(val("max_disp", 35))
+                self.stereo_widget.set_convergence(config.get("convergence_point", 1.0))
+                self.stereo_widget.set_gamma(config.get("gamma", 1.0))
+                self.stereo_widget.set_border_width(val("border_width", 0))
+                self.stereo_widget.set_border_bias(config.get("border_bias", 0.5))
+                self.depth_widget.set_dilate_x(val("dilate_x", 12))
+                self.depth_widget.set_dilate_y(config.get("dilate_y", 3))
+                self.depth_widget.set_blur_x(val("blur_x", 5))
+                self.depth_widget.set_blur_y(val("blur_y", 5))
 
-                idx = self.ui.comboBox_preview_source.findText(config.get("preview_source", "Splat Result"))
-                if idx >= 0:
-                    self.ui.comboBox_preview_source.setCurrentIndex(idx)
+                preview_mode = config.get("preview_source", "Splat Result")
+                self.preview_widget.set_preview_mode(preview_mode)
 
                 preview_scale = config.get("preview_scale", "Auto")
-                if preview_scale:
-                    idx = self.ui.comboBox_preview_scale.findText(preview_scale)
-                    if idx >= 0:
-                        self.ui.comboBox_preview_scale.setCurrentIndex(idx)
-                        self.on_preview_scale_changed(preview_scale)
+                self.preview_widget.set_scale(preview_scale)
 
                 self.ui.action_debug.setChecked(config.get("debug_logging", False))
                 self.ui.action_auto_update_sidecar.setChecked(config.get("auto_update_sidecar", False))
@@ -249,128 +260,35 @@ class SplattingApp(QtWidgets.QMainWindow):
             finally:
                 self.ui.centralwidget.blockSignals(False)
 
-            self.update_all_labels()
+            self.stereo_widget.update_labels()
+            self.depth_widget.update_labels()
             logger.info("Configuration auto-loaded.")
         except Exception as e:
             self.ui.centralwidget.blockSignals(False)
             logger.error(f"Failed to load config: {e}")
 
     def init_ui_defaults(self):
-        self.ui.comboBox_preview_source.clear()
-        modes = [
-            "Splat Result",
-            "Splat Result(Low)",
-            "Occlusion Mask",
-            "Occlusion Mask(Low)",
-            "Original (Left Eye)",
-            "Depth Map",
-            "Depth Map (Color)",
-            "Anaglyph 3D",
-            "Dubois Anaglyph",
-            "Optimized Anaglyph",
-            "Side-by-Side",
-            "Wigglegram",
-            "Mesh Warp",
-            "SBS + Mesh",
-        ]
-        self.ui.comboBox_preview_source.addItems(modes)
-        logger.info(f"Initialized Preview Source with {len(modes)} modes.")
-
-        self.ui.comboBox_border.clear()
-        self.ui.comboBox_border.addItems(["Off", "Auto Basic", "Auto Adv.", "Manual"])
-
-        self.ui.lineEdit_mesh_extrusion.setValidator(QDoubleValidator(-1.0, 5.0, 3, self))
-        self.ui.lineEdit_mesh_density.setValidator(QDoubleValidator(0.0, 1.0, 3, self))
-        self.ui.lineEdit_mesh_bias.setValidator(QDoubleValidator(-1.0, 1.0, 3, self))
-        self.ui.lineEdit_mesh_dolly.setValidator(QDoubleValidator(0.0, 100.0, 3, self))
-
-        self.ui.comboBox_preview_scale.clear()
-        percentage_values = ["Auto"] + [
-            "250%",
-            "240%",
-            "230%",
-            "220%",
-            "210%",
-            "200%",
-            "190%",
-            "180%",
-            "170%",
-            "160%",
-            "150%",
-            "145%",
-            "140%",
-            "135%",
-            "130%",
-            "125%",
-            "120%",
-            "115%",
-            "110%",
-            "105%",
-            "100%",
-            "95%",
-            "90%",
-            "85%",
-            "80%",
-            "75%",
-            "70%",
-            "65%",
-            "60%",
-            "55%",
-            "50%",
-            "25%",
-        ]
-        self.ui.comboBox_preview_scale.addItems(percentage_values)
-        self.ui.comboBox_preview_scale.setCurrentText("Auto")
-
-        self.ui.horizontalSlider_border_bias.setMinimum(0)
-        self.ui.horizontalSlider_border_bias.setMaximum(100)
-
-        self.ui.lineEdit_low_width.setValidator(QIntValidator(64, 4096, self))
-        self.ui.lineEdit_low_height.setValidator(QIntValidator(64, 4096, self))
-        self.ui.lineEdit_high_batch.setValidator(QIntValidator(1, 128, self))
-        self.ui.lineEdit_low_batch.setValidator(QIntValidator(1, 128, self))
-        self.ui.lineEdit_process_length.setValidator(QIntValidator(0, 999999, self))
-        self.ui.lineEdit_blur_bias.setValidator(QDoubleValidator(0.0, 1.0, 3, self))
-        self.ui.lineEdit_jump_to.setValidator(QIntValidator(1, 999999, self))
-
-        self.update_all_labels()
-
+        self.preview_widget.init_ui_defaults()
+        self.stereo_widget.init_ui_defaults()
         self.ui.action_debug.setChecked(False)
 
-    def setup_slider(self, slider, label, divisor=1.0):
-        def on_change(value):
-            if divisor == 0:
-                label.setText(str(value))
-            else:
-                label.setText(f"{value / divisor:.2f}")
-            self._request_render()
+    def _connect_signals(self):
+        self.preview_widget.frame_changed.connect(self._on_frame_change)
+        self.preview_widget.video_changed.connect(lambda delta: self.change_video(delta))
+        self.preview_widget.playback_requested.connect(self.toggle_playback)
+        self.preview_widget.scale_changed.connect(self._on_preview_scale_changed)
 
-        slider.valueChanged.connect(on_change)
+        self.processing_widget.start_processing.connect(self._on_start_processing)
+        self.processing_widget.stop_processing.connect(self._on_stop_processing)
+        self.processing_widget.start_single.connect(self._on_start_single_processing)
+        self.processing_widget.update_sidecar.connect(self.save_sidecar)
 
-    def update_all_labels(self):
-        self.ui.label_disparity_value.setText(str(self.ui.horizontalSlider_disparity.value()))
-        self.ui.label_convergence_value.setText(f"{self.ui.horizontalSlider_convergence.value() / 100.0:.2f}")
-        self.ui.label_gamma_value.setText(f"{self.ui.horizontalSlider_gamma.value() / 100.0:.2f}")
-        self.ui.label_border_width_value.setText(str(self.ui.horizontalSlider_border_width.value()))
-        bias_val = (self.ui.horizontalSlider_border_bias.value() - 50) / 50.0
-        self.ui.label_bias_value.setText(f"{bias_val:.2f}")
+        self.video_list_widget.load_clicked.connect(self.load_videos)
 
-    def connect_signals(self):
-        self.ui.pushButton_browse_source.clicked.connect(lambda: self.browse_folder(self.ui.lineEdit_input_source))
-        self.ui.pushButton_browse_depth.clicked.connect(lambda: self.browse_folder(self.ui.lineEdit_input_depth))
-        self.ui.pushButton_browse_output.clicked.connect(lambda: self.browse_folder(self.ui.lineEdit_output_splatted))
-        self.ui.pushButton_browse_sidecar.clicked.connect(lambda: self.browse_folder(self.ui.lineEdit_inout_sidecar))
-        self.ui.pushButton_load_refresh.clicked.connect(self.load_videos)
-
-        self.ui.horizontalSlider.valueChanged.connect(self.on_frame_change)
-        self.ui.pushButton_next.clicked.connect(lambda: self.change_video(1))
-        self.ui.pushButton_prev.clicked.connect(lambda: self.change_video(-1))
-
-        self.ui.pushButton_play.clicked.connect(self.toggle_playback)
-        self.ui.pushButton_fast_forward.clicked.connect(lambda: self.toggle_playback(fast=True))
+        self.ui.comboBox_preview_source.currentTextChanged.connect(self._on_preview_source_changed)
         self.ui.spinBox_ff_speed.valueChanged.connect(self.update_playback_speed)
+        self.ui.lineEdit_jump_to.editingFinished.connect(self.on_jump_to_clip)
 
-        self.ui.comboBox_preview_scale.currentTextChanged.connect(self.on_preview_scale_changed)
         self.ui.action_debug.triggered.connect(self.on_debug_toggled)
         self.ui.action_calculator.triggered.connect(self.on_action_calculator)
         self.ui.action_load_settings.triggered.connect(self.on_load_settings)
@@ -383,20 +301,17 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.action_guide.triggered.connect(self.on_user_guide)
         self.ui.action_about.triggered.connect(self.on_about)
         self.ui.action_exit.triggered.connect(self.close)
-
-        # Unconnected menu actions - add handlers
         self.ui.action_restore_from_finished.triggered.connect(self.on_restore_finished)
         self.ui.action_load_fsexport.triggered.connect(self.on_load_fsexport)
 
-        self.ui.pushButton_start.clicked.connect(self.on_start_processing)
-        self.ui.pushButton_stop.clicked.connect(self.on_stop_processing)
-        self.ui.pushButton_single.clicked.connect(self.on_start_single_processing)
-        self.ui.pushButton_update_sidecar.clicked.connect(self.save_sidecar)
+    def _on_preview_source_changed(self, mode):
+        self._request_render(self.preview_widget.get_frame())
 
-    def on_bias_change(self, value):
-        bias_val = (value - 50) / 50.0
-        self.ui.label_bias_value.setText(f"{bias_val:.2f}")
-        self._request_render()
+    def on_jump_to_clip(self):
+        target = self.preview_widget.get_current_video_idx()
+        if 0 <= target < len(self.controller.video_list):
+            self.current_video_idx = target
+            self.change_video(0)
 
     def toggle_playback(self, fast=False):
         if self.play_timer.isActive():
@@ -432,21 +347,14 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.play_timer.stop()
         self.ui.pushButton_play.setIcon(QtGui.QIcon.fromTheme("media-playback-start"))
 
-    def on_loop_toggled(self, checked):
-        self.playback_worker.set_loop_enabled(checked)
-
     def _on_frame_ready(self, pil_img):
-        # Handle wigglegram tuple (left_img, right_img)
         if isinstance(pil_img, tuple):
             self._wiggle_left_img, self._wiggle_right_img = pil_img
-            # Start wiggle timer if not already running
             if not self._wiggle_timer.isActive() and self.preview_window.isVisible():
-                self._wiggle_timer.start(60)  # 60ms interval
-            # Show first frame
+                self._wiggle_timer.start(60)
             self._show_wiggle_frame(self._wiggle_state)
             return
 
-        # Stop wiggle timer for non-wigglegram modes
         self._wiggle_timer.stop()
         self._wiggle_left_img = None
         self._wiggle_right_img = None
@@ -457,12 +365,10 @@ class SplattingApp(QtWidgets.QMainWindow):
             self._save_sidecar_async()
 
     def _wiggle_step(self):
-        """Toggle wiggle state and display the other frame."""
         self._wiggle_state = not self._wiggle_state
         self._show_wiggle_frame(self._wiggle_state)
 
     def _show_wiggle_frame(self, show_left: bool):
-        """Display either left or right wigglegram frame."""
         if show_left and self._wiggle_left_img:
             pixmap = QtGui.QPixmap.fromImage(ImageQt(self._wiggle_left_img))
             self.preview_window.set_image(pixmap)
@@ -479,7 +385,6 @@ class SplattingApp(QtWidgets.QMainWindow):
         if frame_idx is None:
             frame_idx = self.ui.horizontalSlider.value()
 
-        # Handle case where frame_idx might be a string from combobox signal or other source
         try:
             frame_idx = int(float(frame_idx))
         except (ValueError, TypeError):
@@ -491,107 +396,12 @@ class SplattingApp(QtWidgets.QMainWindow):
         if params:
             self.render_worker.render_frame(frame_idx, params)
 
-    def toggle_preview_window(self):
-        if self.preview_window.isVisible():
-            self.preview_window.hide()
-        else:
-            screen = QtGui.QGuiApplication.primaryScreen().availableGeometry()
-            size = self.preview_window.geometry()
-            self.preview_window.move(screen.center().x() - size.width() // 2, screen.center().y() - size.height() // 2)
-            self.preview_window.show()
-            self._request_render()
-
-    def browse_folder(self, line_edit):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory")
-        if folder:
-            line_edit.setText(folder)
-
-    def load_videos(self):
-        src = self.ui.lineEdit_input_source.text()
-        depth = self.ui.lineEdit_input_depth.text()
-        sidecar = self.ui.lineEdit_inout_sidecar.text()
-        multi = self.ui.checkBox_multi_map.isChecked()
-
-        self.controller.set_sidecar_folder(sidecar)
-        self.batch_controller.sidecar_folder = sidecar
-        self.batch_controller.input_source_clips = src
-        self.batch_controller.input_depth_maps = depth
-        self.batch_controller.output_splatted = self.ui.lineEdit_output_splatted.text()
-        self.batch_controller.video_list = self.controller.video_list
-
-        old_path = None
-        if self.controller.video_list:
-            old_path = self.controller.video_list[self.current_video_idx]["source_video"]
-
-        video_list = self.controller.load_video_list(src, depth, multi)
-        if video_list:
-            new_idx = 0
-            if old_path:
-                for idx, entry in enumerate(video_list):
-                    if entry["source_video"] == old_path:
-                        new_idx = idx
-                        break
-
-            self.current_video_idx = new_idx
-            self.change_video(0)
-            self.ui.label_status.setText(f"Loaded {len(video_list)} videos.")
-
-            if not self.preview_window.isVisible():
-                self.preview_window.show()
-                self._request_render(0)
-
-    def change_video(self, delta):
-        new_idx = self.current_video_idx + delta
-        params = self.get_params()
-        logger.debug(f"change_video called with delta={delta}, params={params}")
-        if not params:
-            params = {"strict_ffmpeg_decode": False}
-        if self.controller.set_current_video(new_idx, params):
-            self.current_video_idx = new_idx
-
-            self._load_sidecar()
-
-            entry = self.controller.get_current_video_entry()
-            if entry:
-                logger.info(f"Loading: {entry['source_video']}")
-
-            total_frames = self.controller.get_total_frames()
-            self.playback_worker.set_total_frames(total_frames)
-
-            self.ui.horizontalSlider.blockSignals(True)
-            self.ui.horizontalSlider.setMaximum(total_frames - 1)
-            self.ui.horizontalSlider.setValue(0)
-            self.ui.horizontalSlider.blockSignals(False)
-
-            self.ui.comboBox_map_select.clear()
-            if self.ui.checkBox_multi_map.isChecked() and entry:
-                map_folder = os.path.basename(os.path.dirname(entry["depth_map"]))
-                self.ui.comboBox_map_select.addItem(map_folder)
-            else:
-                self.ui.comboBox_map_select.addItem("Default")
-
-            self.ui.label_video_info.setText(f"Video: {new_idx + 1} / {len(self.controller.video_list)}")
-            self.ui.lineEdit_jump_to.setText(str(new_idx + 1))
-            self.ui.label_frame_info.setText(f"Frame: 1 / {total_frames}")
-            self._request_render(0)
-        else:
-            logger.error(f"Could not load video index {new_idx}")
-
-    def on_jump_to_clip(self):
-        try:
-            target = int(self.ui.lineEdit_jump_to.text())
-            new_idx = max(0, min(target - 1, len(self.controller.video_list) - 1))
-            self.current_video_idx = new_idx
-            self.change_video(0)
-        except ValueError:
-            pass
-
-    def on_frame_change(self, frame):
+    def _on_frame_change(self, frame):
         total = self.controller.get_total_frames()
-        self.ui.label_frame_info.setText(f"Frame: {frame + 1} / {total}")
+        self.video_list_widget.set_frame_info(frame, total)
         self._request_render(frame)
 
-    def on_preview_scale_changed(self, value: str):
+    def _on_preview_scale_changed(self, value: str):
         if not value or value == "Auto":
             self.preview_window.set_scale_factor(None)
         elif value.endswith("%"):
@@ -631,7 +441,7 @@ class SplattingApp(QtWidgets.QMainWindow):
         if not sidecar_data:
             return
 
-        current_mode = self.ui.comboBox_preview_source.currentText()
+        current_mode = self.preview_widget.get_preview_mode()
 
         self.ui.centralwidget.blockSignals(True)
         try:
@@ -651,32 +461,30 @@ class SplattingApp(QtWidgets.QMainWindow):
             self.ui.horizontalSlider_blur_y.blockSignals(True)
 
             sidecar_mode = params.get("preview_source", current_mode)
-            idx = self.ui.comboBox_preview_source.findText(sidecar_mode)
-            if idx >= 0:
-                self.ui.comboBox_preview_source.setCurrentIndex(idx)
+            self.preview_widget.set_preview_mode(sidecar_mode)
 
-            self.ui.lineEdit_blur_bias.setText(str(sidecar_data.get("blur_bias", 0.5)))
-            self.ui.lineEdit_mesh_extrusion.setText(str(sidecar_data.get("mesh_extrusion", 0.5)))
-            self.ui.lineEdit_mesh_density.setText(str(sidecar_data.get("mesh_density", 0.5)))
-            self.ui.lineEdit_mesh_dolly.setText(str(sidecar_data.get("mesh_dolly", 0.0)))
+            self.depth_widget.set_blur_bias(sidecar_data.get("blur_bias", 0.5))
+            self.splatting_widget.set_mesh_extrusion(sidecar_data.get("mesh_extrusion", 0.5))
+            self.splatting_widget.set_mesh_density(sidecar_data.get("mesh_density", 0.5))
+            self.splatting_widget.set_mesh_dolly(sidecar_data.get("mesh_dolly", 0.0))
 
             steering = float(params.get("view_bias", 0.0))
-            self.ui.lineEdit_mesh_bias.setText(f"{steering:.2f}")
+            self.splatting_widget.set_mesh_bias(steering)
 
             border_bias = float(params.get("border_bias", 0.0))
-            self.ui.horizontalSlider_border_bias.setValue(int((border_bias * 50) + 50))
-            self.ui.label_bias_value.setText(f"{border_bias:.2f}")
+            self.stereo_widget.set_border_bias(border_bias)
+            self.stereo_widget.update_labels()
 
-            self.ui.horizontalSlider_disparity.setValue(val("max_disp", 35))
-            self.ui.horizontalSlider_convergence.setValue(int(float(params.get("convergence_point", 0.5)) * 100))
-            self.ui.horizontalSlider_gamma.setValue(int(float(params.get("gamma", 1.0)) * 100))
-            self.ui.horizontalSlider_dilate_x.setValue(val("dilate_x", 0))
-            self.ui.horizontalSlider_dilate_y.setValue(val("dilate_y", 0))
-            self.ui.horizontalSlider_blur_x.setValue(val("blur_x", 5))
-            self.ui.horizontalSlider_blur_y.setValue(val("blur_y", 5))
+            self.stereo_widget.set_disparity(val("max_disp", 35))
+            self.stereo_widget.set_convergence(params.get("convergence_point", 0.5))
+            self.stereo_widget.set_gamma(params.get("gamma", 1.0))
+            self.depth_widget.set_dilate_x(val("dilate_x", 0))
+            self.depth_widget.set_dilate_y(val("dilate_y", 0))
+            self.depth_widget.set_blur_x(val("blur_x", 5))
+            self.depth_widget.set_blur_y(val("blur_y", 5))
 
             if "cross_view" in params:
-                self.ui.checkBox_cross_view.setChecked(bool(params["cross_view"]))
+                self.stereo_widget.set_cross_view(bool(params["cross_view"]))
 
         finally:
             self.ui.horizontalSlider_disparity.blockSignals(False)
@@ -691,7 +499,8 @@ class SplattingApp(QtWidgets.QMainWindow):
             self.ui.lineEdit_blur_bias.blockSignals(False)
             self.ui.centralwidget.blockSignals(False)
 
-        self.update_all_labels()
+        self.stereo_widget.update_labels()
+        self.depth_widget.update_labels()
         logger.info(f"Sidecar loaded for video {self.current_video_idx + 1}")
 
     def load_sidecar(self):
@@ -699,35 +508,36 @@ class SplattingApp(QtWidgets.QMainWindow):
 
     def get_params(self) -> dict:
         try:
-            preview_mode = self.ui.comboBox_preview_source.currentText()
+            preview_mode = self.preview_widget.get_preview_mode()
             modes_without_cross_view = ["Original (Left Eye)", "Splat Result", "Splat Result(Low)"]
 
             logger.debug(f"get_params called, preview_mode: {preview_mode}")
 
             params = {
                 "preview_source": preview_mode,
-                "strict_ffmpeg_decode": self.ui.checkBox_ffmpeg.isChecked(),
-                "max_disp": self.ui.horizontalSlider_disparity.value(),
-                "convergence_point": self.ui.horizontalSlider_convergence.value() / 100.0,
-                "gamma": self.ui.horizontalSlider_gamma.value() / 100.0,
-                "border_mode": self.ui.comboBox_border.currentText(),
-                "border_width": self.ui.horizontalSlider_border_width.value(),
-                "view_bias": float(self.ui.lineEdit_mesh_bias.text() or 0.0),
-                "border_bias": (self.ui.horizontalSlider_border_bias.value() - 50) / 50.0,
-                "cross_view": self.ui.checkBox_cross_view.isChecked()
+                "strict_ffmpeg_decode": self.resolution_widget.is_strict_ffmpeg(),
+                "max_disp": self.stereo_widget.get_disparity(),
+                "convergence_point": self.stereo_widget.get_convergence(),
+                "gamma": self.stereo_widget.get_gamma(),
+                "border_mode": self.stereo_widget.get_border_mode(),
+                "border_width": self.stereo_widget.get_border_width(),
+                "view_bias": self.splatting_widget.get_mesh_bias(),
+                "border_bias": self.stereo_widget.get_border_bias(),
+                "cross_view": self.stereo_widget.is_cross_view()
                 if preview_mode not in modes_without_cross_view
                 else False,
-                "dilate_x": self.ui.horizontalSlider_dilate_x.value(),
-                "dilate_y": self.ui.horizontalSlider_dilate_y.value() / 2.0,
-                "blur_x": self.ui.horizontalSlider_blur_x.value(),
-                "blur_y": self.ui.horizontalSlider_blur_y.value(),
-                "blur_bias": float(self.ui.lineEdit_blur_bias.text() or 0.5),
-                "mesh_extrusion": float(self.ui.lineEdit_mesh_extrusion.text() or 0.5),
-                "mesh_density": float(self.ui.lineEdit_mesh_density.text() or 0.5),
-                "mesh_dolly": float(self.ui.lineEdit_mesh_dolly.text() or 0.0),
-                "slider_disparity": self.ui.horizontalSlider_disparity.value(),
-                "slider_convergence": self.ui.horizontalSlider_convergence.value(),
-                "slider_bias": self.ui.horizontalSlider_border_bias.value(),
+                "dilate_x": self.depth_widget.get_dilate_x(),
+                "dilate_y": self.depth_widget.get_dilate_y(),
+                "blur_x": self.depth_widget.get_blur_x(),
+                "blur_y": self.depth_widget.get_blur_y(),
+                "blur_bias": self.depth_widget.get_blur_bias(),
+                "mesh_extrusion": self.splatting_widget.get_mesh_extrusion(),
+                "mesh_density": self.splatting_widget.get_mesh_density(),
+                "mesh_dolly": self.splatting_widget.get_mesh_dolly(),
+                "mask_type": self.splatting_widget.get_mask_type(),
+                "slider_disparity": self.stereo_widget.get_disparity(),
+                "slider_convergence": self.stereo_widget.get_convergence(),
+                "slider_bias": self.stereo_widget.get_border_bias(),
             }
             logger.debug(f"get_params returning: {params}")
             return params
@@ -748,50 +558,50 @@ class SplattingApp(QtWidgets.QMainWindow):
 
     def _get_processing_settings(self) -> ProcessingSettings:
         settings = ProcessingSettings(
-            input_source_clips=self.ui.lineEdit_input_source.text(),
-            input_depth_maps=self.ui.lineEdit_input_depth.text(),
-            output_splatted=self.ui.lineEdit_output_splatted.text(),
-            max_disp=float(self.ui.horizontalSlider_disparity.value()),
-            zero_disparity_anchor=float(self.ui.horizontalSlider_convergence.value()) / 100.0,
-            depth_gamma=float(self.ui.horizontalSlider_gamma.value()) / 100.0,
-            process_length=int(self.ui.lineEdit_process_length.text() or -1),
-            enable_full_resolution=self.ui.checkBox_enable_full_res.isChecked(),
-            full_res_batch_size=int(self.ui.lineEdit_high_batch.text() or 10),
-            enable_low_resolution=self.ui.checkBox_enable_low_res.isChecked(),
-            low_res_width=int(self.ui.lineEdit_low_width.text() or 1920),
-            low_res_height=int(self.ui.lineEdit_low_height.text() or 1080),
-            low_res_batch_size=int(self.ui.lineEdit_low_batch.text() or 50),
-            dual_output=self.ui.checkBox_dual_output.isChecked(),
-            strict_ffmpeg_decode=self.ui.checkBox_ffmpeg.isChecked(),
+            input_source_clips=self.io_widget.get_source_path(),
+            input_depth_maps=self.io_widget.get_depth_path(),
+            output_splatted=self.io_widget.get_output_path(),
+            max_disp=self.stereo_widget.get_disparity(),
+            zero_disparity_anchor=self.stereo_widget.get_convergence(),
+            depth_gamma=self.stereo_widget.get_gamma(),
+            process_length=self.splatting_widget.get_process_length(),
+            enable_full_resolution=self.resolution_widget.is_full_res_enabled(),
+            full_res_batch_size=self.resolution_widget.get_full_batch_size(),
+            enable_low_resolution=self.resolution_widget.is_low_res_enabled(),
+            low_res_width=self.resolution_widget.get_low_width(),
+            low_res_height=self.resolution_widget.get_low_height(),
+            low_res_batch_size=self.resolution_widget.get_low_batch_size(),
+            dual_output=self.resolution_widget.is_dual_output(),
+            strict_ffmpeg_decode=self.resolution_widget.is_strict_ffmpeg(),
             move_to_finished=True,
-            sidecar_folder=self.ui.lineEdit_inout_sidecar.text(),
-            multi_map=self.ui.checkBox_multi_map.isChecked(),
-            depth_dilate_size_x=float(self.ui.horizontalSlider_dilate_x.value()),
-            depth_dilate_size_y=float(self.ui.horizontalSlider_dilate_y.value()),
-            depth_blur_size_x=float(self.ui.horizontalSlider_blur_x.value()),
-            depth_blur_size_y=float(self.ui.horizontalSlider_blur_y.value()),
+            sidecar_folder=self.io_widget.get_sidecar_path(),
+            multi_map=self.io_widget.is_multi_map(),
+            depth_dilate_size_x=self.depth_widget.get_dilate_x(),
+            depth_dilate_size_y=self.depth_widget.get_dilate_y(),
+            depth_blur_size_x=self.depth_widget.get_blur_x(),
+            depth_blur_size_y=self.depth_widget.get_blur_y(),
+            mask_mode=self.splatting_widget.get_mask_type(),
+            is_test_mode=self.dev_tools_widget.is_splat_test() or self.dev_tools_widget.is_map_test(),
+            test_target_frame_idx=self.preview_widget.get_frame(),
+            test_type="map" if self.dev_tools_widget.is_map_test() else "splat",
         )
         return settings
 
     def _enable_inputs(self, enabled: bool):
-        state = "normal" if enabled else "disabled"
-        self.ui.pushButton_start.setEnabled(enabled)
-        self.ui.pushButton_single.setEnabled(enabled)
-        self.ui.pushButton_stop.setEnabled(not enabled)
-        self.ui.pushButton_load_refresh.setEnabled(enabled)
+        self.processing_widget.set_enabled(enabled)
 
-    def on_start_processing(self):
+    def _on_start_processing(self):
         self._enable_inputs(False)
         self.batch_controller.stop_event.clear()
         settings = self._get_processing_settings()
         self.batch_controller.start_batch(settings)
         self._processing_timer.start(100)
 
-    def on_stop_processing(self):
+    def _on_stop_processing(self):
         self.batch_controller.stop()
-        self.ui.label_status.setText("Stopping...")
+        self.processing_widget.set_status("Stopping...")
 
-    def on_start_single_processing(self):
+    def _on_start_single_processing(self):
         self._enable_inputs(False)
         self.batch_controller.stop_event.clear()
         settings = self._get_processing_settings()
@@ -811,14 +621,14 @@ class SplattingApp(QtWidgets.QMainWindow):
         try:
             config = load_settings_from_file(filename)
             self._apply_config_to_ui(config)
-            self.ui.label_status.setText("Settings loaded.")
+            self.processing_widget.set_status("Settings loaded.")
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
 
     def on_save_settings(self):
         config = self.get_params()
         self.save_config()
-        self.ui.label_status.setText("Settings saved.")
+        self.processing_widget.set_status("Settings saved.")
 
     def on_save_settings_to_file(self):
         from core.splatting.config_manager import save_settings_to_file
@@ -831,7 +641,7 @@ class SplattingApp(QtWidgets.QMainWindow):
         try:
             config = self.get_params()
             save_settings_to_file(config, filename)
-            self.ui.label_status.setText(f"Saved settings to {os.path.basename(filename)}")
+            self.processing_widget.set_status(f"Saved settings to {os.path.basename(filename)}")
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
 
@@ -843,15 +653,14 @@ class SplattingApp(QtWidgets.QMainWindow):
             return
         generator = FusionSidecarGenerator()
         generator.generate_sidecar(sidecar_path, self.get_params())
-        self.ui.label_status.setText("FSExport sidecar generated.")
+        self.processing_widget.set_status("FSExport sidecar generated.")
 
     def on_update_from_sidecar(self):
         self._load_sidecar()
-        self.ui.label_status.setText("Loaded sidecar data.")
+        self.processing_widget.set_status("Loaded sidecar data.")
 
     def on_auto_update_sidecar(self, checked):
         self._auto_save_sidecar = checked
-        # Also use this to control auto-loading sidecar when video changes
         self.ui.action_auto_update_sidecar.setChecked(checked)
 
     def on_encoder_settings(self):
@@ -861,7 +670,7 @@ class SplattingApp(QtWidgets.QMainWindow):
         if dialog.exec():
             self._encoding_config = dialog.get_config()
             self.save_config()
-            self.ui.label_status.setText("Encoding settings saved")
+            self.processing_widget.set_status("Encoding settings saved")
 
     def on_user_guide(self):
         import webbrowser
@@ -879,7 +688,6 @@ class SplattingApp(QtWidgets.QMainWindow):
         )
 
     def on_restore_finished(self):
-        """Moves all files from 'finished' folders back to their original input folders."""
         from core.common.file_organizer import move_files_to_finished
 
         reply = QtWidgets.QMessageBox.question(
@@ -892,8 +700,8 @@ class SplattingApp(QtWidgets.QMainWindow):
         if reply == QtWidgets.QMessageBox.No:
             return
 
-        source_clip_dir = self.ui.lineEdit_input_source.text()
-        depth_map_dir = self.ui.lineEdit_input_depth.text()
+        source_clip_dir = self.io_widget.get_source_path()
+        depth_map_dir = self.io_widget.get_depth_path()
 
         if not (os.path.isdir(source_clip_dir) and os.path.isdir(depth_map_dir)):
             QtWidgets.QMessageBox.warning(
@@ -932,57 +740,6 @@ class SplattingApp(QtWidgets.QMainWindow):
             "Restore Complete",
             f"Finished files restoration attempted.\n{moved} files moved.\n{failed} errors occurred.",
         )
-        if reply == QtWidgets.QMessageBox.No:
-            return
-
-        source_clip_dir = self.ui.lineEdit_input_source.text()
-        depth_map_dir = self.ui.lineEdit_input_depth.text()
-
-        if not (os.path.isdir(source_clip_dir) and os.path.isdir(depth_map_dir)):
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Restore Error",
-                "Restore 'finished' operation is only applicable when Input Source Clips and Input Depth Maps are set to directories (batch mode).",
-            )
-            return
-
-        finished_source_folder = os.path.join(source_clip_dir, "finished")
-        finished_depth_folder = os.path.join(depth_map_dir, "finished")
-
-        restored_count = 0
-        errors_count = 0
-
-        if os.path.isdir(finished_source_folder):
-            logger.info(f"Restoring source clips from: {finished_source_folder}")
-            for filename in os.listdir(finished_source_folder):
-                src_path = os.path.join(finished_source_folder, filename)
-                dest_path = os.path.join(source_clip_dir, filename)
-                if os.path.isfile(src_path):
-                    try:
-                        shutil.move(src_path, dest_path)
-                        restored_count += 1
-                    except Exception as e:
-                        errors_count += 1
-                        logger.error(f"Error moving source clip '{filename}': {e}")
-
-        if os.path.isdir(finished_depth_folder):
-            logger.info(f"Restoring depth maps from: {finished_depth_folder}")
-            for filename in os.listdir(finished_depth_folder):
-                src_path = os.path.join(finished_depth_folder, filename)
-                dest_path = os.path.join(depth_map_dir, filename)
-                if os.path.isfile(src_path):
-                    try:
-                        shutil.move(src_path, dest_path)
-                        restored_count += 1
-                    except Exception as e:
-                        errors_count += 1
-                        logger.error(f"Error moving depth map '{filename}': {e}")
-
-        QtWidgets.QMessageBox.information(
-            self,
-            "Restore Complete",
-            f"Finished files restoration attempted.\n{restored_count} files moved.\n{errors_count} errors occurred.",
-        )
 
     def on_load_fsexport(self):
         from core.splatting.fusion_export import FusionSidecarGenerator
@@ -997,7 +754,7 @@ class SplattingApp(QtWidgets.QMainWindow):
             data = generator.load_fsexport(filename)
             if data:
                 self._apply_config_to_ui(data)
-                self.ui.label_status.setText(f"Loaded Fusion export: {filename}")
+                self.processing_widget.set_status(f"Loaded Fusion export: {filename}")
             else:
                 QtWidgets.QMessageBox.warning(self, "Load Failed", "Could not load Fusion export file.")
         except Exception as e:
@@ -1005,30 +762,169 @@ class SplattingApp(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Load Error", f"Failed to load: {e}")
 
     def _apply_config_to_ui(self, config: dict):
-        """Apply loaded config to UI widgets."""
         if "max_disp" in config:
-            self.ui.horizontalSlider_disparity.setValue(int(config["max_disp"]))
+            self.stereo_widget.set_disparity(int(config["max_disp"]))
         if "convergence_point" in config:
-            self.ui.horizontalSlider_convergence.setValue(int(float(config["convergence_point"]) * 100))
+            self.stereo_widget.set_convergence(float(config["convergence_point"]))
         if "gamma" in config:
-            self.ui.horizontalSlider_gamma.setValue(int(float(config["gamma"]) * 100))
+            self.stereo_widget.set_gamma(float(config["gamma"]))
         if "slider_border_width" in config:
-            self.ui.horizontalSlider_border_width.setValue(config["slider_border_width"])
+            self.stereo_widget.set_border_width(config["slider_border_width"])
         if "slider_bias" in config:
-            self.ui.horizontalSlider_border_bias.setValue(config["slider_bias"])
+            self.stereo_widget.set_border_bias(config["slider_bias"])
         if "input_source" in config:
-            self.ui.lineEdit_input_source.setText(config["input_source"])
+            self.io_widget.set_source_path(config["input_source"])
         if "input_depth" in config:
-            self.ui.lineEdit_input_depth.setText(config["input_depth"])
+            self.io_widget.set_depth_path(config["input_depth"])
         if "output_splatted" in config:
-            self.ui.lineEdit_output_splatted.setText(config["output_splatted"])
+            self.io_widget.set_output_path(config["output_splatted"])
         if "sidecar_path" in config:
-            self.ui.lineEdit_inout_sidecar.setText(config["sidecar_path"])
+            self.io_widget.set_sidecar_path(config["sidecar_path"])
         if "preview_source" in config:
-            idx = self.ui.comboBox_preview_source.findText(config["preview_source"])
-            if idx >= 0:
-                self.ui.comboBox_preview_source.setCurrentIndex(idx)
-        self.update_all_labels()
+            self.preview_widget.set_preview_mode(config["preview_source"])
+        self.stereo_widget.update_labels()
+        self.depth_widget.update_labels()
+
+    def load_videos(self):
+        src = self.io_widget.get_source_path()
+        depth = self.io_widget.get_depth_path()
+        sidecar = self.io_widget.get_sidecar_path()
+        multi = self.io_widget.is_multi_map()
+
+        self.controller.set_sidecar_folder(sidecar)
+        self.batch_controller.sidecar_folder = sidecar
+        self.batch_controller.input_source_clips = src
+        self.batch_controller.input_depth_maps = depth
+        self.batch_controller.output_splatted = self.io_widget.get_output_path()
+        self.batch_controller.video_list = self.controller.video_list
+
+        old_path = None
+        if self.controller.video_list:
+            old_path = self.controller.video_list[self.current_video_idx]["source_video"]
+
+        video_list = self.controller.load_video_list(src, depth, multi)
+        if video_list:
+            new_idx = 0
+            if old_path:
+                for idx, entry in enumerate(video_list):
+                    if entry["source_video"] == old_path:
+                        new_idx = idx
+                        break
+
+            self.current_video_idx = new_idx
+            self.change_video(0)
+            self.processing_widget.set_status(f"Loaded {len(video_list)} videos.")
+
+            if not self.preview_window.isVisible():
+                self.preview_window.show()
+                self._request_render(0)
+
+    def change_video(self, delta):
+        new_idx = self.current_video_idx + delta
+        params = self.get_params()
+        logger.debug(f"change_video called with delta={delta}, params={params}")
+        if not params:
+            params = {"strict_ffmpeg_decode": False}
+        if self.controller.set_current_video(new_idx, params):
+            self.current_video_idx = new_idx
+
+            self._load_sidecar()
+
+            entry = self.controller.get_current_video_entry()
+            if entry:
+                logger.info(f"Loading: {entry['source_video']}")
+
+            total_frames = self.controller.get_total_frames()
+            self.playback_worker.set_total_frames(total_frames)
+
+            self.preview_widget.set_total_frames(total_frames)
+            self.preview_widget.set_frame(0)
+
+            if self.io_widget.is_multi_map() and entry:
+                map_folder = os.path.basename(os.path.dirname(entry["depth_map"]))
+                self.video_list_widget.set_map_selector_items([map_folder])
+            else:
+                self.video_list_widget.set_map_selector_items(["Default"])
+
+            self.video_list_widget.set_video_info(new_idx, len(self.controller.video_list))
+            self.video_list_widget.set_frame_info(0, total_frames)
+            self._request_render(0)
+        else:
+            logger.error(f"Could not load video index {new_idx}")
+
+    def _handle_diagnostic_capture(self, payload: dict):
+        """Handle diagnostic capture - save preview vs render comparison."""
+        try:
+            grid = payload.get("grid")
+            task_name = payload.get("task_name", "render")
+            test_type = payload.get("test_type", "splat")
+            task_suffix = payload.get("task_suffix", "")
+
+            if grid is None:
+                return
+
+            # Determine output directory
+            output_dir = self.io_widget.get_output_path()
+            if not output_dir:
+                output_dir = os.getcwd()
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Get frame index
+            frame_idx = self.preview_widget.get_frame()
+
+            # Get video base name
+            video_entry = self.controller.get_current_video_entry() if self.controller.video_list else {}
+            video_name = os.path.splitext(os.path.basename(video_entry.get("source_video", "capture")))[0]
+
+            # Get task suffix
+            task_suffix_str = ""
+            if task_name.lower() in ("hires", "full", "fullres"):
+                task_suffix_str = "_hi"
+            elif task_name.lower() in ("lowres", "low"):
+                task_suffix_str = "_low"
+
+            # Test type
+            kind = "maptest" if test_type.startswith("map") else "splattest"
+
+            # Create filenames
+            stem = f"{video_name}_frame_{frame_idx:05d}_{kind}"
+
+            # Save render grid as PNG
+            grid_uint8 = (np.clip(grid, 0.0, 1.0) * 255).astype(np.uint8)
+            grid_bgr = cv2.cvtColor(grid_uint8, cv2.COLOR_RGB2BGR)
+            render_path = os.path.join(output_dir, f"{stem}_render{task_suffix_str}.png")
+            cv2.imwrite(render_path, grid_bgr)
+            logger.info(f"Diagnostic render saved: {render_path}")
+
+            # Capture preview from preview window if available
+            if self.preview_window.isVisible() and self.preview_window.label.pixmap():
+                preview_pixmap = self.preview_window.label.pixmap()
+                preview_img = preview_pixmap.toImage()
+
+                # Convert QImage to numpy array
+                width = preview_img.width()
+                height = preview_img.height()
+
+                # Get the raw image data - Qt stores as BGRA
+                # Convert to bytes and reshape
+                img_size = preview_img.sizeInBytes()
+                ptr = preview_img.bits()
+
+                # Create numpy array from the image data
+                arr = np.array(ptr).reshape((height, width, 4))
+
+                # Convert BGRA to BGR (Qt uses BGRA)
+                preview_bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+
+                preview_path = os.path.join(output_dir, f"{stem}_preview{task_suffix_str}.png")
+                cv2.imwrite(preview_path, preview_bgr)
+                logger.info(f"Diagnostic preview saved: {preview_path}")
+            else:
+                logger.warning("Preview window not available for capture")
+
+            self.processing_widget.set_status(f"Test outputs saved to: {output_dir}")
+        except Exception as e:
+            logger.error(f"Diagnostic capture save failed: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

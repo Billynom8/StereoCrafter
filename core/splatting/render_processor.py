@@ -93,6 +93,7 @@ class RenderProcessor:
         dnxhr_profile: str = "HQX",
         is_test_mode: bool = False,
         test_target_frame_idx: Optional[int] = None,
+        test_type: str = "splat",
         mask_mode: str = "SC",
     ) -> bool:
         """Core splatting render loop.
@@ -361,43 +362,73 @@ class RenderProcessor:
                     skip_preprocessing=skip_lowres_preproc and is_low_res_task,
                 )
 
-                # Normalize back to 0-1 after processing
-                batch_depth_numpy_float = batch_depth_processed / max(max_expected_raw_value, 1.0)
-                batch_depth_numpy_float = np.clip(batch_depth_numpy_float, 0.0, 1.0)
+            # Normalize back to 0-1 after processing
+            batch_depth_numpy_float = batch_depth_processed / max(max_expected_raw_value, 1.0)
+            batch_depth_numpy_float = np.clip(batch_depth_numpy_float, 0.0, 1.0)
 
-                # 4. GPU Splatting
-                batch_processed_frames = self._process_gpu_splatting(
-                    stereo_projector=stereo_projector,
-                    batch_video_numpy=batch_video_numpy,
-                    batch_depth_numpy_float=batch_depth_numpy_float,
-                    target_width=width,
-                    target_height=height,
-                    max_disp=max_disp,
-                    zero_disparity_anchor_val=zero_disparity_anchor_val,
-                    input_bias=input_bias,
-                    tv_disp_comp=tv_disp_comp,
-                    mask_mode=mask_mode,
+            # 4. GPU Splatting
+            batch_processed_frames = self._process_gpu_splatting(
+                stereo_projector=stereo_projector,
+                batch_video_numpy=batch_video_numpy,
+                batch_depth_numpy_float=batch_depth_numpy_float,
+                target_width=width,
+                target_height=height,
+                max_disp=max_disp,
+                zero_disparity_anchor_val=zero_disparity_anchor_val,
+                input_bias=input_bias,
+                tv_disp_comp=tv_disp_comp,
+                mask_mode=mask_mode,
+            )
+
+            # Debug logging for comparison
+            logger.debug(
+                f"[BATCH COMPARE] max_disp={max_disp}, convergence={zero_disparity_anchor_val}, input_bias={input_bias}"
+            )
+            logger.debug(
+                f"[BATCH COMPARE] depth_gamma={depth_gamma}, dilate_x={depth_dilate_size_x}, dilate_y={depth_dilate_size_y}"
+            )
+
+            # 5. Handle results (diag tests or FFmpeg write)
+            if is_test_mode and test_target_frame_idx is not None:
+                # Construct diagnostic output path - save to main output dir (not subfolders)
+                output_dir_main = (
+                    os.path.dirname(os.path.dirname(output_video_path_base)) if output_video_path_base else None
+                )
+                video_name_base = (
+                    os.path.basename(output_video_path_base).replace(".mp4", "") if output_video_path_base else "test"
                 )
 
-                # 5. Handle results (diag tests or FFmpeg write)
-                if is_test_mode and test_target_frame_idx is not None:
-                    self._handle_diagnostic_capture(batch_processed_frames, dual_output, task_name)
-                elif ffmpeg_process:
-                    if use_dnxhr_split and mask_process and splat_process:
-                        self._write_split_to_ffmpeg(mask_process, splat_process, batch_processed_frames)
-                    else:
-                        self._write_to_ffmpeg(ffmpeg_process, batch_processed_frames, dual_output)
+                # Determine task suffix for filename
+                task_suffix = ""
+                if task_name.lower() in ("hires", "full", "fullres"):
+                    task_suffix = "_hi"
+                elif task_name.lower() in ("lowres", "low"):
+                    task_suffix = "_low"
 
-                frame_count += len(batch_indices)
-                self.progress_queue.put(("processed", frame_count))
-                if not is_test_mode:
-                    draw_progress_bar(
-                        frame_count, total_frames_to_process, suffix=f"{task_name} Batch {i // batch_size}"
-                    )
+                test_output_path = (
+                    os.path.join(output_dir_main, f"{video_name_base}{task_suffix}_test.png")
+                    if output_dir_main
+                    else None
+                )
+                self._handle_diagnostic_capture(
+                    batch_processed_frames, dual_output, task_name, test_output_path, test_type, task_suffix
+                )
+            elif ffmpeg_process:
+                if use_dnxhr_split and mask_process and splat_process:
+                    self._write_split_to_ffmpeg(mask_process, splat_process, batch_processed_frames)
+                else:
+                    self._write_to_ffmpeg(ffmpeg_process, batch_processed_frames, dual_output)
 
-                # Cleanup batch
-                del batch_video_numpy, batch_depth_numpy_raw, batch_depth_numpy_float, batch_processed_frames
-                release_cuda_memory()
+                    frame_count += len(batch_indices)
+                    self.progress_queue.put(("processed", frame_count))
+                    if not is_test_mode:
+                        draw_progress_bar(
+                            frame_count, total_frames_to_process, suffix=f"{task_name} Batch {i // batch_size}"
+                        )
+
+                    # Cleanup batch
+                    del batch_video_numpy, batch_depth_numpy_raw, batch_depth_numpy_float, batch_processed_frames
+                    release_cuda_memory()
 
         except Exception as e:
             logger.error(f"Render error: {e}", exc_info=True)
@@ -626,14 +657,72 @@ class RenderProcessor:
             )
         return results
 
-    def _handle_diagnostic_capture(self, batch_results: List[dict], dual_output: bool, task_name: str):
+    def _handle_diagnostic_capture(
+        self,
+        batch_results: List[dict],
+        dual_output: bool,
+        task_name: str,
+        output_path: str = None,
+        test_type: str = "splat",
+        task_suffix: str = "",
+    ):
         # In test mode, we usually only have one frame
         if not batch_results:
             return
         res = batch_results[0]
-        # For diagnostic captures, we always use the 4-panel grid so the depth map is available
+
+        # Get individual components
+        left = res["left"]
+        right = res["right"]
+        occlusion = res["occlusion"]
+        depth = res["depth"]
+
+        # Ensure 3-channel for saving
+        if left.ndim == 2 or (left.ndim == 3 and left.shape[-1] == 1):
+            left = np.stack([left.squeeze()] * 3, axis=-1)
+        if depth.ndim == 2 or (depth.ndim == 3 and depth.shape[-1] == 1):
+            depth = np.stack([depth.squeeze()] * 3, axis=-1)
+        if occlusion.ndim == 2 or (occlusion.ndim == 3 and occlusion.shape[-1] == 1):
+            occlusion = np.stack([occlusion.squeeze()] * 3, axis=-1)
+
+        # Save individual debug images
+        if output_path:
+            base = output_path.replace(".png", "")
+            try:
+                # Save original source (left eye)
+                left_uint8 = (np.clip(left, 0.0, 1.0) * 255).astype(np.uint8)
+                left_bgr = cv2.cvtColor(left_uint8, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(f"{base}_source.png", left_bgr)
+                logger.info(f"Debug source saved: {base}_source.png")
+
+                # Save depth map
+                depth_uint8 = (np.clip(depth, 0.0, 1.0) * 255).astype(np.uint8)
+                depth_bgr = cv2.cvtColor(depth_uint8, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(f"{base}_depth.png", depth_bgr)
+                logger.info(f"Debug depth map saved: {base}_depth.png")
+
+                # Save occlusion mask
+                occl_uint8 = (np.clip(occlusion, 0.0, 1.0) * 255).astype(np.uint8)
+                occl_bgr = cv2.cvtColor(occl_uint8, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(f"{base}_occlusion.png", occl_bgr)
+                logger.info(f"Debug occlusion mask saved: {base}_occlusion.png")
+
+                # Save splat result
+                right_uint8 = (np.clip(right, 0.0, 1.0) * 255).astype(np.uint8)
+                right_bgr = cv2.cvtColor(right_uint8, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(f"{base}_splat.png", right_bgr)
+                logger.info(f"Debug splat result saved: {base}_splat.png")
+            except Exception as e:
+                logger.error(f"Failed to save debug images: {e}")
+
+        # Also send 4-panel grid via queue for GUI handling
         grid = self._construct_grid(res, dual_output=False)
-        self.progress_queue.put(("diagnostic_capture", {"grid": grid, "task_name": task_name}))
+        self.progress_queue.put(
+            (
+                "diagnostic_capture",
+                {"grid": grid, "task_name": task_name, "test_type": test_type, "task_suffix": task_suffix},
+            )
+        )
 
     def _write_to_ffmpeg(self, process: Any, batch_results: List[dict], dual_output: bool):
         for res in batch_results:

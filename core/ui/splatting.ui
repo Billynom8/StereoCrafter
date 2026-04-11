@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1309</width>
-    <height>755</height>
+    <width>1333</width>
+    <height>773</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -103,10 +103,38 @@ QProgressBar::chunk {
     background-color: palette(highlight); 
     width: 1px; 
 }
-   </string>
+/* Tab Widget - Make it match the theme */
+QTabWidget::pane {
+    border: 1px solid palette(mid);
+    background-color: palette(window);  /* Matches your main window */
+    border-radius: 3px;
+}
+
+QTabWidget::tab-bar {
+    alignment: left;
+}
+
+QTabBar::tab {
+    background-color: palette(window);
+    color: palette(button-text);
+    padding: 6px 12px;
+    margin-right: 2px;
+    border-top-left-radius: 3px;
+    border-top-right-radius: 3px;
+}
+
+QTabBar::tab:selected {
+    background-color: palette(button);  /* Blends with the pane */
+    color: palette(text);
+    border-bottom: 1px solid palette(window);  /* Hides the separator line */
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: palette(light);
+}</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QGridLayout" name="gridLayout">
+   <layout class="QGridLayout" name="gridLayout_9">
     <item row="0" column="0">
      <layout class="QGridLayout" name="gridLayout_1">
       <item row="0" column="0">
@@ -123,6 +151,9 @@ QProgressBar::chunk {
         <layout class="QGridLayout" name="gridLayout_2">
          <item row="2" column="2">
           <widget class="QPushButton" name="pushButton_browse_output">
+           <property name="acceptDrops">
+            <bool>true</bool>
+           </property>
            <property name="text">
             <string>Browse Folder</string>
            </property>
@@ -140,6 +171,9 @@ QProgressBar::chunk {
          </item>
          <item row="1" column="2">
           <widget class="QPushButton" name="pushButton_browse_depth">
+           <property name="acceptDrops">
+            <bool>true</bool>
+           </property>
            <property name="text">
             <string>Browse Folder</string>
            </property>
@@ -154,6 +188,9 @@ QProgressBar::chunk {
          </item>
          <item row="1" column="3">
           <widget class="QPushButton" name="pushButton_select_depth">
+           <property name="acceptDrops">
+            <bool>true</bool>
+           </property>
            <property name="text">
             <string>Select File</string>
            </property>
@@ -195,6 +232,9 @@ QProgressBar::chunk {
          </item>
          <item row="0" column="3">
           <widget class="QPushButton" name="pushButton_select_source">
+           <property name="acceptDrops">
+            <bool>true</bool>
+           </property>
            <property name="text">
             <string>Select File</string>
            </property>
@@ -202,6 +242,9 @@ QProgressBar::chunk {
          </item>
          <item row="0" column="2">
           <widget class="QPushButton" name="pushButton_browse_source">
+           <property name="acceptDrops">
+            <bool>true</bool>
+           </property>
            <property name="text">
             <string>Browse Folder</string>
            </property>
@@ -216,6 +259,9 @@ QProgressBar::chunk {
          </item>
          <item row="3" column="2">
           <widget class="QPushButton" name="pushButton_browse_sidecar">
+           <property name="acceptDrops">
+            <bool>true</bool>
+           </property>
            <property name="text">
             <string>Browse Folder</string>
            </property>
@@ -547,221 +593,388 @@ QProgressBar::chunk {
       <item>
        <layout class="QVBoxLayout" name="verticalLayout_left_panel">
         <item>
-         <widget class="QGroupBox" name="groupBox_process_resolution">
-          <property name="maximumSize">
-           <size>
-            <width>16777215</width>
-            <height>16777215</height>
-           </size>
+         <widget class="QTabWidget" name="tabWidget">
+          <property name="currentIndex">
+           <number>0</number>
           </property>
-          <property name="title">
-           <string>Process Resolution</string>
-          </property>
-          <layout class="QGridLayout" name="gridLayout_3">
-           <item row="0" column="0" colspan="2">
-            <widget class="QCheckBox" name="checkBox_enable_full_res">
-             <property name="text">
-              <string>Enable Full Res</string>
-             </property>
-             <property name="checked">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="2">
-            <widget class="QLabel" name="label_batch_size_full">
-             <property name="text">
-              <string>Batch Size:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="0" colspan="2">
-            <widget class="QCheckBox" name="checkBox_enable_low_res">
-             <property name="text">
-              <string>Enable Low Res</string>
-             </property>
-             <property name="checked">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="2">
-            <widget class="QLabel" name="label_batch_size_low">
-             <property name="text">
-              <string>Batch Size:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="0">
-            <widget class="QLabel" name="label_width">
-             <property name="text">
-              <string>Width:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="2">
-            <widget class="QLabel" name="label_height">
-             <property name="text">
-              <string>Height:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="4">
-            <widget class="QCheckBox" name="checkBox_dual_output">
-             <property name="text">
-              <string>Dual Output Only</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="4">
-            <widget class="QCheckBox" name="checkBox_ffmpeg">
-             <property name="text">
-              <string>ffmpeg</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="3">
-            <widget class="QLineEdit" name="lineEdit_high_batch">
-             <property name="text">
-              <string>7</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="3">
-            <widget class="QLineEdit" name="lineEdit_low_batch">
-             <property name="text">
-              <string>13</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="3">
-            <widget class="QLineEdit" name="lineEdit_low_height">
-             <property name="text">
-              <string>320</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="1">
-            <widget class="QLineEdit" name="lineEdit_low_width">
-             <property name="text">
-              <string>640</string>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </widget>
-        </item>
-        <item>
-         <widget class="QGroupBox" name="groupBox_splatting_settings">
-          <property name="maximumSize">
-           <size>
-            <width>16777215</width>
-            <height>16777215</height>
-           </size>
-          </property>
-          <property name="title">
-           <string>Splatting &amp; Output Settings</string>
-          </property>
-          <layout class="QGridLayout" name="gridLayout_4">
-           <item row="1" column="2">
-            <widget class="QLabel" name="label_border">
-             <property name="text">
-              <string>Border:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="1">
-            <widget class="QLineEdit" name="lineEdit_mesh_extrusion"/>
-           </item>
-           <item row="1" column="0">
-            <widget class="QLabel" name="label_mask">
-             <property name="text">
-              <string>Mask:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="3">
-            <widget class="QComboBox" name="comboBox_auto_convergence">
-             <item>
-              <property name="text">
-               <string>Off</string>
+          <widget class="QWidget" name="tab_output_settings">
+           <attribute name="title">
+            <string>Output Settings</string>
+           </attribute>
+           <layout class="QVBoxLayout" name="verticalLayout">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="QGroupBox" name="groupBox_splatting_settings">
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
               </property>
-             </item>
-            </widget>
-           </item>
-           <item row="0" column="1">
-            <widget class="QLineEdit" name="lineEdit_process_length"/>
-           </item>
-           <item row="3" column="2">
-            <widget class="QLabel" name="label_density">
-             <property name="text">
-              <string>Density:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="3">
-            <widget class="QLineEdit" name="lineEdit_mesh_dolly"/>
-           </item>
-           <item row="3" column="0">
-            <widget class="QLabel" name="label_extrusion">
-             <property name="text">
-              <string>Extrusion:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="2">
-            <widget class="QLabel" name="label_auto_convergence">
-             <property name="text">
-              <string>Auto-Converge:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="0" column="0">
-            <widget class="QLabel" name="label_process_length">
-             <property name="text">
-              <string>Process Length:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="1" column="1">
-            <widget class="QComboBox" name="comboBox_mask_type">
-             <item>
-              <property name="text">
-               <string>M2S</string>
+              <property name="title">
+               <string>Splatting &amp; Output Settings</string>
               </property>
-             </item>
-            </widget>
-           </item>
-           <item row="1" column="3">
-            <widget class="QComboBox" name="comboBox_border">
-             <item>
-              <property name="text">
-               <string>Auto Adv.</string>
+              <layout class="QGridLayout" name="gridLayout_4">
+               <item row="0" column="1">
+                <widget class="QLineEdit" name="lineEdit_process_length">
+                 <property name="text">
+                  <string>-1</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QLabel" name="label_mesh_bias">
+                 <property name="text">
+                  <string>Mesh Bias:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="2">
+                <widget class="QLabel" name="label_border">
+                 <property name="text">
+                  <string>Border:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="3">
+                <widget class="QComboBox" name="comboBox_border">
+                 <item>
+                  <property name="text">
+                   <string>Auto Adv.</string>
+                  </property>
+                 </item>
+                </widget>
+               </item>
+               <item row="2" column="1">
+                <widget class="QLineEdit" name="lineEdit_mesh_bias">
+                 <property name="text">
+                  <string>0.5</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="3" column="0">
+                <widget class="QLabel" name="label_extrusion">
+                 <property name="text">
+                  <string>Extrusion:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="0">
+                <widget class="QLabel" name="label_process_length">
+                 <property name="text">
+                  <string>Process Length:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="2">
+                <widget class="QLabel" name="label_auto_convergence">
+                 <property name="text">
+                  <string>Auto-Converge:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="3" column="1">
+                <widget class="QLineEdit" name="lineEdit_mesh_extrusion">
+                 <property name="text">
+                  <string>0.5</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QComboBox" name="comboBox_mask_type">
+                 <item>
+                  <property name="text">
+                   <string>M2S</string>
+                  </property>
+                 </item>
+                </widget>
+               </item>
+               <item row="2" column="2">
+                <widget class="QLabel" name="label_dolly">
+                 <property name="text">
+                  <string>Dolly:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="3" column="2">
+                <widget class="QLabel" name="label_density">
+                 <property name="text">
+                  <string>Density:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="3">
+                <widget class="QLineEdit" name="lineEdit_mesh_dolly">
+                 <property name="text">
+                  <string>0</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QLabel" name="label_mask">
+                 <property name="text">
+                  <string>Mask:</string>
+                 </property>
+                 <property name="alignment">
+                  <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="3">
+                <widget class="QComboBox" name="comboBox_auto_convergence">
+                 <item>
+                  <property name="text">
+                   <string>Off</string>
+                  </property>
+                 </item>
+                </widget>
+               </item>
+               <item row="3" column="3">
+                <widget class="QLineEdit" name="lineEdit_mesh_density">
+                 <property name="text">
+                  <string>0.5</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          <widget class="QWidget" name="tab_output_types">
+           <attribute name="title">
+            <string>Output Types</string>
+           </attribute>
+           <layout class="QVBoxLayout" name="verticalLayout_2">
+            <property name="leftMargin">
+             <number>6</number>
+            </property>
+            <property name="topMargin">
+             <number>6</number>
+            </property>
+            <property name="rightMargin">
+             <number>6</number>
+            </property>
+            <property name="bottomMargin">
+             <number>6</number>
+            </property>
+            <item>
+             <widget class="QGroupBox" name="groupBox_process_resolution">
+              <property name="maximumSize">
+               <size>
+                <width>16777215</width>
+                <height>16777215</height>
+               </size>
               </property>
-             </item>
-            </widget>
-           </item>
-           <item row="2" column="0">
-            <widget class="QLabel" name="label_mesh_bias">
-             <property name="text">
-              <string>Mesh Bias:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="2" column="1">
-            <widget class="QLineEdit" name="lineEdit_mesh_bias"/>
-           </item>
-           <item row="2" column="2">
-            <widget class="QLabel" name="label_dolly">
-             <property name="text">
-              <string>Dolly:</string>
-             </property>
-            </widget>
-           </item>
-           <item row="3" column="3">
-            <widget class="QLineEdit" name="lineEdit_mesh_density"/>
-           </item>
-          </layout>
+              <property name="title">
+               <string>Process Resolution</string>
+              </property>
+              <layout class="QGridLayout" name="gridLayout_3">
+               <item row="0" column="0" colspan="2">
+                <widget class="QCheckBox" name="checkBox_enable_full_res">
+                 <property name="text">
+                  <string>Enable Full Res</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="2">
+                <widget class="QLabel" name="label_batch_size_full">
+                 <property name="text">
+                  <string>Batch Size:</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="0" colspan="2">
+                <widget class="QCheckBox" name="checkBox_enable_low_res">
+                 <property name="text">
+                  <string>Enable Low Res</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="2">
+                <widget class="QLabel" name="label_batch_size_low">
+                 <property name="text">
+                  <string>Batch Size:</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QLabel" name="label_width">
+                 <property name="text">
+                  <string>Width:</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="2">
+                <widget class="QLabel" name="label_height">
+                 <property name="text">
+                  <string>Height:</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="4">
+                <widget class="QCheckBox" name="checkBox_dual_output">
+                 <property name="text">
+                  <string>Dual Output Only</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="4">
+                <widget class="QCheckBox" name="checkBox_ffmpeg">
+                 <property name="text">
+                  <string>ffmpeg</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="3">
+                <widget class="QLineEdit" name="lineEdit_high_batch">
+                 <property name="text">
+                  <string>7</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="3">
+                <widget class="QLineEdit" name="lineEdit_low_batch">
+                 <property name="text">
+                  <string>13</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="3">
+                <widget class="QLineEdit" name="lineEdit_low_height">
+                 <property name="text">
+                  <string>320</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="1">
+                <widget class="QLineEdit" name="lineEdit_low_width">
+                 <property name="text">
+                  <string>640</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+            <item>
+             <widget class="QGroupBox" name="groupBox_individual_outputs">
+              <property name="title">
+               <string>Individual Outputs</string>
+              </property>
+              <layout class="QGridLayout" name="gridLayout">
+               <item row="0" column="0">
+                <widget class="QCheckBox" name="checkBox_splat_low">
+                 <property name="text">
+                  <string>Splat Low</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="1">
+                <widget class="QCheckBox" name="checkBox_splat_hi">
+                 <property name="text">
+                  <string>Splat High</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="0" column="2">
+                <widget class="QCheckBox" name="checkBox_anaglyph">
+                 <property name="text">
+                  <string>Analyph 3D</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="0">
+                <widget class="QCheckBox" name="checkBox">
+                 <property name="text">
+                  <string>Mask Low</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QCheckBox" name="checkBox_mask">
+                 <property name="text">
+                  <string>Mask High</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="1" column="2">
+                <widget class="QCheckBox" name="checkBox_flowmap_x">
+                 <property name="enabled">
+                  <bool>false</bool>
+                 </property>
+                 <property name="text">
+                  <string>Flowmap X</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="0">
+                <widget class="QCheckBox" name="checkBox_mesh_sbs">
+                 <property name="text">
+                  <string>Mesh SBS</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="1">
+                <widget class="QCheckBox" name="checkBox_splat_sbs">
+                 <property name="text">
+                  <string>Splat SBS</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="2" column="2">
+                <widget class="QCheckBox" name="checkBox_flowmap_full">
+                 <property name="enabled">
+                  <bool>false</bool>
+                 </property>
+                 <property name="text">
+                  <string>Flowmap Full</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </widget>
+            </item>
+           </layout>
+          </widget>
          </widget>
         </item>
        </layout>
@@ -1660,7 +1873,7 @@ QProgressBar::chunk {
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1309</width>
+     <width>1333</width>
      <height>33</height>
     </rect>
    </property>

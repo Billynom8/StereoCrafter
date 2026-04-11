@@ -20,14 +20,14 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QMenu, QMenuBar,
     QProgressBar, QPushButton, QSizePolicy, QSlider,
-    QSpacerItem, QSpinBox, QStatusBar, QVBoxLayout,
-    QWidget)
+    QSpacerItem, QSpinBox, QStatusBar, QTabWidget,
+    QVBoxLayout, QWidget)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(1309, 755)
+        MainWindow.resize(1333, 773)
         icon = QIcon()
         icon.addFile(u"core/ui/icons/logo.svg", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
         MainWindow.setWindowIcon(icon)
@@ -118,7 +118,36 @@ class Ui_MainWindow(object):
 "    background-color: palette(highlight); \n"
 "    width: 1px; \n"
 "}\n"
-"   ")
+"/* Tab Widget - Make it match the theme */\n"
+"QTabWidget::pane {\n"
+"    border: 1px solid palette(mid);\n"
+"    background-color: palette(window);  /* Matches your main window */\n"
+"    border-radius: 3px;\n"
+"}\n"
+"\n"
+"QTabWidget::tab-bar {\n"
+"    alignment: left;\n"
+"}\n"
+"\n"
+"QTabBar::tab {\n"
+"    background-color: palette(window);\n"
+"    color: palette(button-text);\n"
+"    padding: 6px 12px;\n"
+"    margin-right: 2px;\n"
+"    border-top-left-radius: 3px;\n"
+"    border-top-right-radius: 3px;\n"
+"}\n"
+"\n"
+"QTabBar::tab:selected {\n"
+"    background-color: palette(button);  /* Blends with the pane */\n"
+"    color: palette(text);\n"
+"    border-botto"
+                        "m: 1px solid palette(window);  /* Hides the separator line */\n"
+"}\n"
+"\n"
+"QTabBar::tab:hover:!selected {\n"
+"    background-color: palette(light);\n"
+"}")
         self.action_load_settings = QAction(MainWindow)
         self.action_load_settings.setObjectName(u"action_load_settings")
         self.action_save = QAction(MainWindow)
@@ -152,8 +181,8 @@ class Ui_MainWindow(object):
         self.action_exit.setObjectName(u"action_exit")
         self.centralwidget = QWidget(MainWindow)
         self.centralwidget.setObjectName(u"centralwidget")
-        self.gridLayout = QGridLayout(self.centralwidget)
-        self.gridLayout.setObjectName(u"gridLayout")
+        self.gridLayout_9 = QGridLayout(self.centralwidget)
+        self.gridLayout_9.setObjectName(u"gridLayout_9")
         self.gridLayout_1 = QGridLayout()
         self.gridLayout_1.setObjectName(u"gridLayout_1")
         self.groupBox_input_output = QGroupBox(self.centralwidget)
@@ -163,6 +192,7 @@ class Ui_MainWindow(object):
         self.gridLayout_2.setObjectName(u"gridLayout_2")
         self.pushButton_browse_output = QPushButton(self.groupBox_input_output)
         self.pushButton_browse_output.setObjectName(u"pushButton_browse_output")
+        self.pushButton_browse_output.setAcceptDrops(True)
 
         self.gridLayout_2.addWidget(self.pushButton_browse_output, 2, 2, 1, 1)
 
@@ -174,6 +204,7 @@ class Ui_MainWindow(object):
 
         self.pushButton_browse_depth = QPushButton(self.groupBox_input_output)
         self.pushButton_browse_depth.setObjectName(u"pushButton_browse_depth")
+        self.pushButton_browse_depth.setAcceptDrops(True)
 
         self.gridLayout_2.addWidget(self.pushButton_browse_depth, 1, 2, 1, 1)
 
@@ -184,6 +215,7 @@ class Ui_MainWindow(object):
 
         self.pushButton_select_depth = QPushButton(self.groupBox_input_output)
         self.pushButton_select_depth.setObjectName(u"pushButton_select_depth")
+        self.pushButton_select_depth.setAcceptDrops(True)
 
         self.gridLayout_2.addWidget(self.pushButton_select_depth, 1, 3, 1, 1)
 
@@ -211,11 +243,13 @@ class Ui_MainWindow(object):
 
         self.pushButton_select_source = QPushButton(self.groupBox_input_output)
         self.pushButton_select_source.setObjectName(u"pushButton_select_source")
+        self.pushButton_select_source.setAcceptDrops(True)
 
         self.gridLayout_2.addWidget(self.pushButton_select_source, 0, 3, 1, 1)
 
         self.pushButton_browse_source = QPushButton(self.groupBox_input_output)
         self.pushButton_browse_source.setObjectName(u"pushButton_browse_source")
+        self.pushButton_browse_source.setAcceptDrops(True)
 
         self.gridLayout_2.addWidget(self.pushButton_browse_source, 0, 2, 1, 1)
 
@@ -226,6 +260,7 @@ class Ui_MainWindow(object):
 
         self.pushButton_browse_sidecar = QPushButton(self.groupBox_input_output)
         self.pushButton_browse_sidecar.setObjectName(u"pushButton_browse_sidecar")
+        self.pushButton_browse_sidecar.setAcceptDrops(True)
 
         self.gridLayout_2.addWidget(self.pushButton_browse_sidecar, 3, 2, 1, 1)
 
@@ -244,14 +279,14 @@ class Ui_MainWindow(object):
         self.gridLayout_1.addWidget(self.groupBox_input_output, 0, 0, 1, 1)
 
 
-        self.gridLayout.addLayout(self.gridLayout_1, 0, 0, 1, 1)
+        self.gridLayout_9.addLayout(self.gridLayout_1, 0, 0, 1, 1)
 
         self.line_1 = QFrame(self.centralwidget)
         self.line_1.setObjectName(u"line_1")
         self.line_1.setFrameShape(QFrame.Shape.HLine)
         self.line_1.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self.gridLayout.addWidget(self.line_1, 1, 0, 1, 1)
+        self.gridLayout_9.addWidget(self.line_1, 1, 0, 1, 1)
 
         self.horizontalLayout_frame_info = QHBoxLayout()
         self.horizontalLayout_frame_info.setObjectName(u"horizontalLayout_frame_info")
@@ -300,7 +335,7 @@ class Ui_MainWindow(object):
         self.horizontalLayout_frame_info.addWidget(self.horizontalSlider)
 
 
-        self.gridLayout.addLayout(self.horizontalLayout_frame_info, 2, 0, 1, 1)
+        self.gridLayout_9.addLayout(self.horizontalLayout_frame_info, 2, 0, 1, 1)
 
         self.horizontalLayout_preview_controls = QHBoxLayout()
         self.horizontalLayout_preview_controls.setObjectName(u"horizontalLayout_preview_controls")
@@ -416,13 +451,125 @@ class Ui_MainWindow(object):
         self.horizontalLayout_preview_controls.addWidget(self.comboBox_preview_scale)
 
 
-        self.gridLayout.addLayout(self.horizontalLayout_preview_controls, 3, 0, 1, 1)
+        self.gridLayout_9.addLayout(self.horizontalLayout_preview_controls, 3, 0, 1, 1)
 
         self.horizontalLayout_main_content = QHBoxLayout()
         self.horizontalLayout_main_content.setObjectName(u"horizontalLayout_main_content")
         self.verticalLayout_left_panel = QVBoxLayout()
         self.verticalLayout_left_panel.setObjectName(u"verticalLayout_left_panel")
-        self.groupBox_process_resolution = QGroupBox(self.centralwidget)
+        self.tabWidget = QTabWidget(self.centralwidget)
+        self.tabWidget.setObjectName(u"tabWidget")
+        self.tab_output_settings = QWidget()
+        self.tab_output_settings.setObjectName(u"tab_output_settings")
+        self.verticalLayout = QVBoxLayout(self.tab_output_settings)
+        self.verticalLayout.setObjectName(u"verticalLayout")
+        self.verticalLayout.setContentsMargins(6, 6, 6, 6)
+        self.groupBox_splatting_settings = QGroupBox(self.tab_output_settings)
+        self.groupBox_splatting_settings.setObjectName(u"groupBox_splatting_settings")
+        self.groupBox_splatting_settings.setMaximumSize(QSize(16777215, 16777215))
+        self.gridLayout_4 = QGridLayout(self.groupBox_splatting_settings)
+        self.gridLayout_4.setObjectName(u"gridLayout_4")
+        self.lineEdit_process_length = QLineEdit(self.groupBox_splatting_settings)
+        self.lineEdit_process_length.setObjectName(u"lineEdit_process_length")
+
+        self.gridLayout_4.addWidget(self.lineEdit_process_length, 0, 1, 1, 1)
+
+        self.label_mesh_bias = QLabel(self.groupBox_splatting_settings)
+        self.label_mesh_bias.setObjectName(u"label_mesh_bias")
+        self.label_mesh_bias.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_mesh_bias, 2, 0, 1, 1)
+
+        self.label_border = QLabel(self.groupBox_splatting_settings)
+        self.label_border.setObjectName(u"label_border")
+        self.label_border.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_border, 1, 2, 1, 1)
+
+        self.comboBox_border = QComboBox(self.groupBox_splatting_settings)
+        self.comboBox_border.addItem("")
+        self.comboBox_border.setObjectName(u"comboBox_border")
+
+        self.gridLayout_4.addWidget(self.comboBox_border, 1, 3, 1, 1)
+
+        self.lineEdit_mesh_bias = QLineEdit(self.groupBox_splatting_settings)
+        self.lineEdit_mesh_bias.setObjectName(u"lineEdit_mesh_bias")
+
+        self.gridLayout_4.addWidget(self.lineEdit_mesh_bias, 2, 1, 1, 1)
+
+        self.label_extrusion = QLabel(self.groupBox_splatting_settings)
+        self.label_extrusion.setObjectName(u"label_extrusion")
+        self.label_extrusion.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_extrusion, 3, 0, 1, 1)
+
+        self.label_process_length = QLabel(self.groupBox_splatting_settings)
+        self.label_process_length.setObjectName(u"label_process_length")
+        self.label_process_length.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_process_length, 0, 0, 1, 1)
+
+        self.label_auto_convergence = QLabel(self.groupBox_splatting_settings)
+        self.label_auto_convergence.setObjectName(u"label_auto_convergence")
+        self.label_auto_convergence.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_auto_convergence, 0, 2, 1, 1)
+
+        self.lineEdit_mesh_extrusion = QLineEdit(self.groupBox_splatting_settings)
+        self.lineEdit_mesh_extrusion.setObjectName(u"lineEdit_mesh_extrusion")
+
+        self.gridLayout_4.addWidget(self.lineEdit_mesh_extrusion, 3, 1, 1, 1)
+
+        self.comboBox_mask_type = QComboBox(self.groupBox_splatting_settings)
+        self.comboBox_mask_type.addItem("")
+        self.comboBox_mask_type.setObjectName(u"comboBox_mask_type")
+
+        self.gridLayout_4.addWidget(self.comboBox_mask_type, 1, 1, 1, 1)
+
+        self.label_dolly = QLabel(self.groupBox_splatting_settings)
+        self.label_dolly.setObjectName(u"label_dolly")
+        self.label_dolly.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_dolly, 2, 2, 1, 1)
+
+        self.label_density = QLabel(self.groupBox_splatting_settings)
+        self.label_density.setObjectName(u"label_density")
+        self.label_density.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_density, 3, 2, 1, 1)
+
+        self.lineEdit_mesh_dolly = QLineEdit(self.groupBox_splatting_settings)
+        self.lineEdit_mesh_dolly.setObjectName(u"lineEdit_mesh_dolly")
+
+        self.gridLayout_4.addWidget(self.lineEdit_mesh_dolly, 2, 3, 1, 1)
+
+        self.label_mask = QLabel(self.groupBox_splatting_settings)
+        self.label_mask.setObjectName(u"label_mask")
+        self.label_mask.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_4.addWidget(self.label_mask, 1, 0, 1, 1)
+
+        self.comboBox_auto_convergence = QComboBox(self.groupBox_splatting_settings)
+        self.comboBox_auto_convergence.addItem("")
+        self.comboBox_auto_convergence.setObjectName(u"comboBox_auto_convergence")
+
+        self.gridLayout_4.addWidget(self.comboBox_auto_convergence, 0, 3, 1, 1)
+
+        self.lineEdit_mesh_density = QLineEdit(self.groupBox_splatting_settings)
+        self.lineEdit_mesh_density.setObjectName(u"lineEdit_mesh_density")
+
+        self.gridLayout_4.addWidget(self.lineEdit_mesh_density, 3, 3, 1, 1)
+
+
+        self.verticalLayout.addWidget(self.groupBox_splatting_settings)
+
+        self.tabWidget.addTab(self.tab_output_settings, "")
+        self.tab_output_types = QWidget()
+        self.tab_output_types.setObjectName(u"tab_output_types")
+        self.verticalLayout_2 = QVBoxLayout(self.tab_output_types)
+        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
+        self.verticalLayout_2.setContentsMargins(6, 6, 6, 6)
+        self.groupBox_process_resolution = QGroupBox(self.tab_output_types)
         self.groupBox_process_resolution.setObjectName(u"groupBox_process_resolution")
         self.groupBox_process_resolution.setMaximumSize(QSize(16777215, 16777215))
         self.gridLayout_3 = QGridLayout(self.groupBox_process_resolution)
@@ -490,98 +637,65 @@ class Ui_MainWindow(object):
         self.gridLayout_3.addWidget(self.lineEdit_low_width, 2, 1, 1, 1)
 
 
-        self.verticalLayout_left_panel.addWidget(self.groupBox_process_resolution)
+        self.verticalLayout_2.addWidget(self.groupBox_process_resolution)
 
-        self.groupBox_splatting_settings = QGroupBox(self.centralwidget)
-        self.groupBox_splatting_settings.setObjectName(u"groupBox_splatting_settings")
-        self.groupBox_splatting_settings.setMaximumSize(QSize(16777215, 16777215))
-        self.gridLayout_4 = QGridLayout(self.groupBox_splatting_settings)
-        self.gridLayout_4.setObjectName(u"gridLayout_4")
-        self.label_border = QLabel(self.groupBox_splatting_settings)
-        self.label_border.setObjectName(u"label_border")
+        self.groupBox_individual_outputs = QGroupBox(self.tab_output_types)
+        self.groupBox_individual_outputs.setObjectName(u"groupBox_individual_outputs")
+        self.gridLayout = QGridLayout(self.groupBox_individual_outputs)
+        self.gridLayout.setObjectName(u"gridLayout")
+        self.checkBox_splat_low = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_splat_low.setObjectName(u"checkBox_splat_low")
 
-        self.gridLayout_4.addWidget(self.label_border, 1, 2, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_splat_low, 0, 0, 1, 1)
 
-        self.lineEdit_mesh_extrusion = QLineEdit(self.groupBox_splatting_settings)
-        self.lineEdit_mesh_extrusion.setObjectName(u"lineEdit_mesh_extrusion")
+        self.checkBox_splat_hi = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_splat_hi.setObjectName(u"checkBox_splat_hi")
 
-        self.gridLayout_4.addWidget(self.lineEdit_mesh_extrusion, 3, 1, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_splat_hi, 0, 1, 1, 1)
 
-        self.label_mask = QLabel(self.groupBox_splatting_settings)
-        self.label_mask.setObjectName(u"label_mask")
+        self.checkBox_anaglyph = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_anaglyph.setObjectName(u"checkBox_anaglyph")
 
-        self.gridLayout_4.addWidget(self.label_mask, 1, 0, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_anaglyph, 0, 2, 1, 1)
 
-        self.comboBox_auto_convergence = QComboBox(self.groupBox_splatting_settings)
-        self.comboBox_auto_convergence.addItem("")
-        self.comboBox_auto_convergence.setObjectName(u"comboBox_auto_convergence")
+        self.checkBox = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox.setObjectName(u"checkBox")
 
-        self.gridLayout_4.addWidget(self.comboBox_auto_convergence, 0, 3, 1, 1)
+        self.gridLayout.addWidget(self.checkBox, 1, 0, 1, 1)
 
-        self.lineEdit_process_length = QLineEdit(self.groupBox_splatting_settings)
-        self.lineEdit_process_length.setObjectName(u"lineEdit_process_length")
+        self.checkBox_mask = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_mask.setObjectName(u"checkBox_mask")
 
-        self.gridLayout_4.addWidget(self.lineEdit_process_length, 0, 1, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_mask, 1, 1, 1, 1)
 
-        self.label_density = QLabel(self.groupBox_splatting_settings)
-        self.label_density.setObjectName(u"label_density")
+        self.checkBox_flowmap_x = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_flowmap_x.setObjectName(u"checkBox_flowmap_x")
+        self.checkBox_flowmap_x.setEnabled(False)
 
-        self.gridLayout_4.addWidget(self.label_density, 3, 2, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_flowmap_x, 1, 2, 1, 1)
 
-        self.lineEdit_mesh_dolly = QLineEdit(self.groupBox_splatting_settings)
-        self.lineEdit_mesh_dolly.setObjectName(u"lineEdit_mesh_dolly")
+        self.checkBox_mesh_sbs = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_mesh_sbs.setObjectName(u"checkBox_mesh_sbs")
 
-        self.gridLayout_4.addWidget(self.lineEdit_mesh_dolly, 2, 3, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_mesh_sbs, 2, 0, 1, 1)
 
-        self.label_extrusion = QLabel(self.groupBox_splatting_settings)
-        self.label_extrusion.setObjectName(u"label_extrusion")
+        self.checkBox_splat_sbs = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_splat_sbs.setObjectName(u"checkBox_splat_sbs")
 
-        self.gridLayout_4.addWidget(self.label_extrusion, 3, 0, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_splat_sbs, 2, 1, 1, 1)
 
-        self.label_auto_convergence = QLabel(self.groupBox_splatting_settings)
-        self.label_auto_convergence.setObjectName(u"label_auto_convergence")
+        self.checkBox_flowmap_full = QCheckBox(self.groupBox_individual_outputs)
+        self.checkBox_flowmap_full.setObjectName(u"checkBox_flowmap_full")
+        self.checkBox_flowmap_full.setEnabled(False)
 
-        self.gridLayout_4.addWidget(self.label_auto_convergence, 0, 2, 1, 1)
-
-        self.label_process_length = QLabel(self.groupBox_splatting_settings)
-        self.label_process_length.setObjectName(u"label_process_length")
-
-        self.gridLayout_4.addWidget(self.label_process_length, 0, 0, 1, 1)
-
-        self.comboBox_mask_type = QComboBox(self.groupBox_splatting_settings)
-        self.comboBox_mask_type.addItem("")
-        self.comboBox_mask_type.setObjectName(u"comboBox_mask_type")
-
-        self.gridLayout_4.addWidget(self.comboBox_mask_type, 1, 1, 1, 1)
-
-        self.comboBox_border = QComboBox(self.groupBox_splatting_settings)
-        self.comboBox_border.addItem("")
-        self.comboBox_border.setObjectName(u"comboBox_border")
-
-        self.gridLayout_4.addWidget(self.comboBox_border, 1, 3, 1, 1)
-
-        self.label_mesh_bias = QLabel(self.groupBox_splatting_settings)
-        self.label_mesh_bias.setObjectName(u"label_mesh_bias")
-
-        self.gridLayout_4.addWidget(self.label_mesh_bias, 2, 0, 1, 1)
-
-        self.lineEdit_mesh_bias = QLineEdit(self.groupBox_splatting_settings)
-        self.lineEdit_mesh_bias.setObjectName(u"lineEdit_mesh_bias")
-
-        self.gridLayout_4.addWidget(self.lineEdit_mesh_bias, 2, 1, 1, 1)
-
-        self.label_dolly = QLabel(self.groupBox_splatting_settings)
-        self.label_dolly.setObjectName(u"label_dolly")
-
-        self.gridLayout_4.addWidget(self.label_dolly, 2, 2, 1, 1)
-
-        self.lineEdit_mesh_density = QLineEdit(self.groupBox_splatting_settings)
-        self.lineEdit_mesh_density.setObjectName(u"lineEdit_mesh_density")
-
-        self.gridLayout_4.addWidget(self.lineEdit_mesh_density, 3, 3, 1, 1)
+        self.gridLayout.addWidget(self.checkBox_flowmap_full, 2, 2, 1, 1)
 
 
-        self.verticalLayout_left_panel.addWidget(self.groupBox_splatting_settings)
+        self.verticalLayout_2.addWidget(self.groupBox_individual_outputs)
+
+        self.tabWidget.addTab(self.tab_output_types, "")
+
+        self.verticalLayout_left_panel.addWidget(self.tabWidget)
 
 
         self.horizontalLayout_main_content.addLayout(self.verticalLayout_left_panel)
@@ -1022,13 +1136,13 @@ class Ui_MainWindow(object):
         self.horizontalLayout_main_content.setStretch(1, 5)
         self.horizontalLayout_main_content.setStretch(2, 2)
 
-        self.gridLayout.addLayout(self.horizontalLayout_main_content, 4, 0, 1, 1)
+        self.gridLayout_9.addLayout(self.horizontalLayout_main_content, 4, 0, 1, 1)
 
         self.progressBar = QProgressBar(self.centralwidget)
         self.progressBar.setObjectName(u"progressBar")
         self.progressBar.setValue(0)
 
-        self.gridLayout.addWidget(self.progressBar, 5, 0, 1, 1)
+        self.gridLayout_9.addWidget(self.progressBar, 5, 0, 1, 1)
 
         self.label_status = QLabel(self.centralwidget)
         self.label_status.setObjectName(u"label_status")
@@ -1036,7 +1150,7 @@ class Ui_MainWindow(object):
         self.label_status.setMaximumSize(QSize(16777215, 50))
         self.label_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.gridLayout.addWidget(self.label_status, 6, 0, 1, 1)
+        self.gridLayout_9.addWidget(self.label_status, 6, 0, 1, 1)
 
         self.horizontalLayout_bottom_buttons = QHBoxLayout()
         self.horizontalLayout_bottom_buttons.setObjectName(u"horizontalLayout_bottom_buttons")
@@ -1095,12 +1209,12 @@ class Ui_MainWindow(object):
         self.horizontalLayout_bottom_buttons.addWidget(self.pushButton_update_sidecar)
 
 
-        self.gridLayout.addLayout(self.horizontalLayout_bottom_buttons, 7, 0, 1, 1)
+        self.gridLayout_9.addLayout(self.horizontalLayout_bottom_buttons, 7, 0, 1, 1)
 
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QMenuBar(MainWindow)
         self.menubar.setObjectName(u"menubar")
-        self.menubar.setGeometry(QRect(0, 0, 1309, 33))
+        self.menubar.setGeometry(QRect(0, 0, 1333, 33))
         self.menuFile = QMenu(self.menubar)
         self.menuFile.setObjectName(u"menuFile")
         self.menuOptions = QMenu(self.menubar)
@@ -1195,6 +1309,7 @@ class Ui_MainWindow(object):
         self.retranslateUi(MainWindow)
 
         self.pushButton_loop_toggle.setDefault(False)
+        self.tabWidget.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(MainWindow)
@@ -1264,6 +1379,27 @@ class Ui_MainWindow(object):
         self.label_preview_scale.setText(QCoreApplication.translate("MainWindow", u"Preview Scale:", None))
         self.comboBox_preview_scale.setItemText(0, QCoreApplication.translate("MainWindow", u"70%", None))
 
+        self.groupBox_splatting_settings.setTitle(QCoreApplication.translate("MainWindow", u"Splatting & Output Settings", None))
+        self.lineEdit_process_length.setText(QCoreApplication.translate("MainWindow", u"-1", None))
+        self.label_mesh_bias.setText(QCoreApplication.translate("MainWindow", u"Mesh Bias:", None))
+        self.label_border.setText(QCoreApplication.translate("MainWindow", u"Border:", None))
+        self.comboBox_border.setItemText(0, QCoreApplication.translate("MainWindow", u"Auto Adv.", None))
+
+        self.lineEdit_mesh_bias.setText(QCoreApplication.translate("MainWindow", u"0.5", None))
+        self.label_extrusion.setText(QCoreApplication.translate("MainWindow", u"Extrusion:", None))
+        self.label_process_length.setText(QCoreApplication.translate("MainWindow", u"Process Length:", None))
+        self.label_auto_convergence.setText(QCoreApplication.translate("MainWindow", u"Auto-Converge:", None))
+        self.lineEdit_mesh_extrusion.setText(QCoreApplication.translate("MainWindow", u"0.5", None))
+        self.comboBox_mask_type.setItemText(0, QCoreApplication.translate("MainWindow", u"M2S", None))
+
+        self.label_dolly.setText(QCoreApplication.translate("MainWindow", u"Dolly:", None))
+        self.label_density.setText(QCoreApplication.translate("MainWindow", u"Density:", None))
+        self.lineEdit_mesh_dolly.setText(QCoreApplication.translate("MainWindow", u"0", None))
+        self.label_mask.setText(QCoreApplication.translate("MainWindow", u"Mask:", None))
+        self.comboBox_auto_convergence.setItemText(0, QCoreApplication.translate("MainWindow", u"Off", None))
+
+        self.lineEdit_mesh_density.setText(QCoreApplication.translate("MainWindow", u"0.5", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_output_settings), QCoreApplication.translate("MainWindow", u"Output Settings", None))
         self.groupBox_process_resolution.setTitle(QCoreApplication.translate("MainWindow", u"Process Resolution", None))
         self.checkBox_enable_full_res.setText(QCoreApplication.translate("MainWindow", u"Enable Full Res", None))
         self.label_batch_size_full.setText(QCoreApplication.translate("MainWindow", u"Batch Size:", None))
@@ -1277,21 +1413,17 @@ class Ui_MainWindow(object):
         self.lineEdit_low_batch.setText(QCoreApplication.translate("MainWindow", u"13", None))
         self.lineEdit_low_height.setText(QCoreApplication.translate("MainWindow", u"320", None))
         self.lineEdit_low_width.setText(QCoreApplication.translate("MainWindow", u"640", None))
-        self.groupBox_splatting_settings.setTitle(QCoreApplication.translate("MainWindow", u"Splatting & Output Settings", None))
-        self.label_border.setText(QCoreApplication.translate("MainWindow", u"Border:", None))
-        self.label_mask.setText(QCoreApplication.translate("MainWindow", u"Mask:", None))
-        self.comboBox_auto_convergence.setItemText(0, QCoreApplication.translate("MainWindow", u"Off", None))
-
-        self.label_density.setText(QCoreApplication.translate("MainWindow", u"Density:", None))
-        self.label_extrusion.setText(QCoreApplication.translate("MainWindow", u"Extrusion:", None))
-        self.label_auto_convergence.setText(QCoreApplication.translate("MainWindow", u"Auto-Converge:", None))
-        self.label_process_length.setText(QCoreApplication.translate("MainWindow", u"Process Length:", None))
-        self.comboBox_mask_type.setItemText(0, QCoreApplication.translate("MainWindow", u"M2S", None))
-
-        self.comboBox_border.setItemText(0, QCoreApplication.translate("MainWindow", u"Auto Adv.", None))
-
-        self.label_mesh_bias.setText(QCoreApplication.translate("MainWindow", u"Mesh Bias:", None))
-        self.label_dolly.setText(QCoreApplication.translate("MainWindow", u"Dolly:", None))
+        self.groupBox_individual_outputs.setTitle(QCoreApplication.translate("MainWindow", u"Individual Outputs", None))
+        self.checkBox_splat_low.setText(QCoreApplication.translate("MainWindow", u"Splat Low", None))
+        self.checkBox_splat_hi.setText(QCoreApplication.translate("MainWindow", u"Splat High", None))
+        self.checkBox_anaglyph.setText(QCoreApplication.translate("MainWindow", u"Analyph 3D", None))
+        self.checkBox.setText(QCoreApplication.translate("MainWindow", u"Mask Low", None))
+        self.checkBox_mask.setText(QCoreApplication.translate("MainWindow", u"Mask High", None))
+        self.checkBox_flowmap_x.setText(QCoreApplication.translate("MainWindow", u"Flowmap X", None))
+        self.checkBox_mesh_sbs.setText(QCoreApplication.translate("MainWindow", u"Mesh SBS", None))
+        self.checkBox_splat_sbs.setText(QCoreApplication.translate("MainWindow", u"Splat SBS", None))
+        self.checkBox_flowmap_full.setText(QCoreApplication.translate("MainWindow", u"Flowmap Full", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_output_types), QCoreApplication.translate("MainWindow", u"Output Types", None))
         self.groupBox_depth_map_preprocessing.setTitle(QCoreApplication.translate("MainWindow", u"Depth Map Pre-processing", None))
         self.label_blur_left_value.setText(QCoreApplication.translate("MainWindow", u"0", None))
         self.label_blur_y_value.setText(QCoreApplication.translate("MainWindow", u"0", None))

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>438</width>
-    <height>458</height>
+    <width>399</width>
+    <height>347</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -255,98 +255,6 @@
      </layout>
     </widget>
    </item>
-   <item row="1" column="1">
-    <widget class="QGroupBox" name="groupBox_individual_outputs">
-     <property name="title">
-      <string>Individual Outputs</string>
-     </property>
-     <layout class="QGridLayout" name="gridLayout_2">
-      <item row="6" column="0">
-       <widget class="QCheckBox" name="checkBox">
-        <property name="text">
-         <string>Mask Low</string>
-        </property>
-       </widget>
-      </item>
-      <item row="6" column="1">
-       <widget class="QCheckBox" name="checkBox_flowmap_full">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
-        <property name="text">
-         <string>Flowmap Full</string>
-        </property>
-       </widget>
-      </item>
-      <item row="7" column="0">
-       <widget class="QCheckBox" name="checkBox_mask">
-        <property name="text">
-         <string>Mask High</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QCheckBox" name="checkBox_splat_sbs">
-        <property name="text">
-         <string>Splat SBS</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="QCheckBox" name="checkBox_mesh_sbs">
-        <property name="text">
-         <string>Mesh SBS</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="1">
-       <widget class="QCheckBox" name="checkBox_anaglyph">
-        <property name="text">
-         <string>Analyph 3D</string>
-        </property>
-       </widget>
-      </item>
-      <item row="5" column="0">
-       <widget class="QCheckBox" name="checkBox_splat_hi">
-        <property name="text">
-         <string>Splat High</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QCheckBox" name="checkBox_depthmap_color">
-        <property name="text">
-         <string>D.map color</string>
-        </property>
-       </widget>
-      </item>
-      <item row="3" column="0">
-       <widget class="QCheckBox" name="checkBox_splat_low">
-        <property name="text">
-         <string>Splat Low</string>
-        </property>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QCheckBox" name="checkBox_depthmap">
-        <property name="text">
-         <string>Depthmap</string>
-        </property>
-       </widget>
-      </item>
-      <item row="5" column="1">
-       <widget class="QCheckBox" name="checkBox_flowmap_x">
-        <property name="enabled">
-         <bool>false</bool>
-        </property>
-        <property name="text">
-         <string>Flowmap X</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
   </layout>
  </widget>
  <tabstops>
@@ -363,7 +271,6 @@
   <tabstop>checkBox_spatial_aq</tabstop>
   <tabstop>checkBox_temporal_aq</tabstop>
   <tabstop>comboBox_strength_aq</tabstop>
-  <tabstop>checkBox_depthmap</tabstop>
  </tabstops>
  <resources/>
  <connections>

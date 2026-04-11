@@ -19,12 +19,7 @@ import torch
 from decord import VideoReader, cpu
 
 from core.common.file_organizer import move_files_to_finished
-from core.common.video_io import (
-    FFmpegDepthPipeReader,
-    _infer_depth_bit_depth,
-    get_video_stream_info,
-    read_video_frames,
-)
+from core.common.video_io import FFmpegDepthPipeReader, _infer_depth_bit_depth, get_video_stream_info, read_video_frames
 from core.common.gpu_utils import release_cuda_memory
 from .depth_processing import (
     DEPTH_VIS_TV10_BLACK_NORM,
@@ -153,6 +148,7 @@ class ProcessingSettings:
     dnxhr_profile: str = "HQX"
     is_test_mode: bool = False
     test_target_frame_idx: Optional[int] = None
+    test_type: str = "splat"  # "map" or "splat"
     skip_lowres_preproc: bool = False
     sidecar_ext: str = ".fssidecar"
     sidecar_folder: str = ""
@@ -536,6 +532,7 @@ class BatchProcessor:
                 dnxhr_profile=settings.dnxhr_profile,
                 is_test_mode=settings.is_test_mode,
                 test_target_frame_idx=settings.test_target_frame_idx,
+                test_type=settings.test_type,
                 mask_mode=settings.mask_mode,
             )
 
@@ -1139,7 +1136,9 @@ class BatchProcessor:
                         {
                             "frame": frame_num,
                             "source_video": src_bn,
-                            "selected_depth_map": str(current_data.get("selected_depth_map", settings.selected_depth_map)),
+                            "selected_depth_map": str(
+                                current_data.get("selected_depth_map", settings.selected_depth_map)
+                            ),
                             "convergence_plane": round(float(current_data.get("convergence_plane", conv_val)), 6),
                             "left_border": round(float(current_data.get("left_border", 0.0)), 3),
                             "right_border": round(float(current_data.get("right_border", 0.0)), 3),

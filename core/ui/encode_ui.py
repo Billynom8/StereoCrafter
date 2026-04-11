@@ -24,7 +24,7 @@ class Ui_Dialog(object):
     def setupUi(self, Dialog):
         if not Dialog.objectName():
             Dialog.setObjectName(u"Dialog")
-        Dialog.resize(438, 458)
+        Dialog.resize(399, 347)
         self.gridLayout_3 = QGridLayout(Dialog)
         self.gridLayout_3.setObjectName(u"gridLayout_3")
         self.buttonBox = QDialogButtonBox(Dialog)
@@ -198,70 +198,6 @@ class Ui_Dialog(object):
 
         self.gridLayout_3.addWidget(self.groupBox_nvenco_options, 0, 1, 1, 1)
 
-        self.groupBox_individual_outputs = QGroupBox(Dialog)
-        self.groupBox_individual_outputs.setObjectName(u"groupBox_individual_outputs")
-        self.gridLayout_2 = QGridLayout(self.groupBox_individual_outputs)
-        self.gridLayout_2.setObjectName(u"gridLayout_2")
-        self.checkBox = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox.setObjectName(u"checkBox")
-
-        self.gridLayout_2.addWidget(self.checkBox, 6, 0, 1, 1)
-
-        self.checkBox_flowmap_full = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_flowmap_full.setObjectName(u"checkBox_flowmap_full")
-        self.checkBox_flowmap_full.setEnabled(False)
-
-        self.gridLayout_2.addWidget(self.checkBox_flowmap_full, 6, 1, 1, 1)
-
-        self.checkBox_mask = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_mask.setObjectName(u"checkBox_mask")
-
-        self.gridLayout_2.addWidget(self.checkBox_mask, 7, 0, 1, 1)
-
-        self.checkBox_splat_sbs = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_splat_sbs.setObjectName(u"checkBox_splat_sbs")
-
-        self.gridLayout_2.addWidget(self.checkBox_splat_sbs, 0, 1, 1, 1)
-
-        self.checkBox_mesh_sbs = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_mesh_sbs.setObjectName(u"checkBox_mesh_sbs")
-
-        self.gridLayout_2.addWidget(self.checkBox_mesh_sbs, 2, 1, 1, 1)
-
-        self.checkBox_anaglyph = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_anaglyph.setObjectName(u"checkBox_anaglyph")
-
-        self.gridLayout_2.addWidget(self.checkBox_anaglyph, 3, 1, 1, 1)
-
-        self.checkBox_splat_hi = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_splat_hi.setObjectName(u"checkBox_splat_hi")
-
-        self.gridLayout_2.addWidget(self.checkBox_splat_hi, 5, 0, 1, 1)
-
-        self.checkBox_depthmap_color = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_depthmap_color.setObjectName(u"checkBox_depthmap_color")
-
-        self.gridLayout_2.addWidget(self.checkBox_depthmap_color, 2, 0, 1, 1)
-
-        self.checkBox_splat_low = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_splat_low.setObjectName(u"checkBox_splat_low")
-
-        self.gridLayout_2.addWidget(self.checkBox_splat_low, 3, 0, 1, 1)
-
-        self.checkBox_depthmap = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_depthmap.setObjectName(u"checkBox_depthmap")
-
-        self.gridLayout_2.addWidget(self.checkBox_depthmap, 0, 0, 1, 1)
-
-        self.checkBox_flowmap_x = QCheckBox(self.groupBox_individual_outputs)
-        self.checkBox_flowmap_x.setObjectName(u"checkBox_flowmap_x")
-        self.checkBox_flowmap_x.setEnabled(False)
-
-        self.gridLayout_2.addWidget(self.checkBox_flowmap_x, 5, 1, 1, 1)
-
-
-        self.gridLayout_3.addWidget(self.groupBox_individual_outputs, 1, 1, 1, 1)
-
         QWidget.setTabOrder(self.comboBox_codec, self.comboBox_container)
         QWidget.setTabOrder(self.comboBox_container, self.comboBox_encoder)
         QWidget.setTabOrder(self.comboBox_encoder, self.comboBox_quality)
@@ -274,7 +210,6 @@ class Ui_Dialog(object):
         QWidget.setTabOrder(self.comboBox_look_ahead_frames, self.checkBox_spatial_aq)
         QWidget.setTabOrder(self.checkBox_spatial_aq, self.checkBox_temporal_aq)
         QWidget.setTabOrder(self.checkBox_temporal_aq, self.comboBox_strength_aq)
-        QWidget.setTabOrder(self.comboBox_strength_aq, self.checkBox_depthmap)
 
         self.retranslateUi(Dialog)
         self.buttonBox.accepted.connect(Dialog.accept)
@@ -303,17 +238,5 @@ class Ui_Dialog(object):
         self.checkBox_temporal_aq.setStyleSheet(QCoreApplication.translate("Dialog", u"0", None))
         self.checkBox_temporal_aq.setText(QCoreApplication.translate("Dialog", u"Temporal AQ", None))
         self.label_strength_aq.setText(QCoreApplication.translate("Dialog", u"Strength AQ", None))
-        self.groupBox_individual_outputs.setTitle(QCoreApplication.translate("Dialog", u"Individual Outputs", None))
-        self.checkBox.setText(QCoreApplication.translate("Dialog", u"Mask Low", None))
-        self.checkBox_flowmap_full.setText(QCoreApplication.translate("Dialog", u"Flowmap Full", None))
-        self.checkBox_mask.setText(QCoreApplication.translate("Dialog", u"Mask High", None))
-        self.checkBox_splat_sbs.setText(QCoreApplication.translate("Dialog", u"Splat SBS", None))
-        self.checkBox_mesh_sbs.setText(QCoreApplication.translate("Dialog", u"Mesh SBS", None))
-        self.checkBox_anaglyph.setText(QCoreApplication.translate("Dialog", u"Analyph 3D", None))
-        self.checkBox_splat_hi.setText(QCoreApplication.translate("Dialog", u"Splat High", None))
-        self.checkBox_depthmap_color.setText(QCoreApplication.translate("Dialog", u"D.map color", None))
-        self.checkBox_splat_low.setText(QCoreApplication.translate("Dialog", u"Splat Low", None))
-        self.checkBox_depthmap.setText(QCoreApplication.translate("Dialog", u"Depthmap", None))
-        self.checkBox_flowmap_x.setText(QCoreApplication.translate("Dialog", u"Flowmap X", None))
     # retranslateUi
 

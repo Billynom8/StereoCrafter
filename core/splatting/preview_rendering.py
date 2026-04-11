@@ -267,6 +267,14 @@ class PreviewRenderer:
         max_disp = float(settings.get("max_disp", 20.0))
         tv_comp = float(settings.get("tv_disp_compensation", 1.0))
 
+        # Debug logging for comparison
+        self.logger.debug(f"[PREVIEW COMPARE] max_disp={max_disp}, convergence={convergence}")
+        self.logger.debug(f"[PREVIEW COMPARE] depth_gamma={settings.get('depth_gamma', 1.0)}")
+        self.logger.debug(
+            f"[PREVIEW COMPARE] dilate_x={settings.get('dilate_x', 0)}, dilate_y={settings.get('dilate_y', 0)}"
+        )
+        self.logger.debug(f"[PREVIEW COMPARE] blur_x={settings.get('blur_x', 0)}, blur_y={settings.get('blur_y', 0)}")
+
         disp_map = (disp_map - convergence) * 2.0
         actual_max_disp_pixels = (max_disp / 20.0 / 100.0) * W_target * tv_comp
         disp_map = disp_map * actual_max_disp_pixels
@@ -290,8 +298,21 @@ class PreviewRenderer:
                 right_eye[:, :, :, -r_px:] = 0.0
 
         # Handle Mesh-based modes (Right Eye or SBS)
-        if "Mesh" in preview_mode or "mesh" in preview_mode.lower():
-            self.logger.debug("Mesh mode detected, preparing mesh render")
+        # Pure mesh modes should NOT run forward warp - they are separate alternatives
+        is_pure_mesh_mode = preview_mode in ["Mesh Warp", "Side-by-Side (Mesh)"]
+        is_sbs_mesh_compare = preview_mode == "SBS + Mesh"
+
+        if is_pure_mesh_mode or "Mesh" in preview_mode or "mesh" in preview_mode.lower():
+            self.logger.debug(
+                f"Mesh mode detected: {preview_mode}, pure_mesh={is_pure_mesh_mode}, sbs_compare={is_sbs_mesh_compare}"
+            )
+
+            # For pure mesh modes, skip forward warp entirely - they are independent alternatives
+            if is_pure_mesh_mode:
+                # Cleanup forward warp resources that were initialized but not used
+                del stereo_projector, disp_map
+                release_cuda_memory()
+
             # CRITICAL: We want the original UN-BORDERED image for the mesh engine
             # because the mesh engine handles its own geometry.
             clean_src_np = (source_resized_original.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
@@ -378,8 +399,9 @@ class PreviewRenderer:
         else:
             pil_img = None
 
-        # Cleanup
-        del stereo_projector, disp_map, right_eye_raw, occlusion_mask
+        # Cleanup - only if forward warp was performed
+        if not is_pure_mesh_mode:
+            del stereo_projector, disp_map, right_eye_raw, occlusion_mask
         release_cuda_memory()
 
         self.logger.debug("--- Finished Preview Render ---")
