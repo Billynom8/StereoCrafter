@@ -8,7 +8,11 @@ from typing import List, Tuple, Optional, Callable
 
 
 def move_single_file(
-    src_path: str, dest_folder: str, logger: Optional[logging.Logger] = None, max_retries: int = 1, retry_delay: float = 0.5
+    src_path: str,
+    dest_folder: str,
+    logger: Optional[logging.Logger] = None,
+    max_retries: int = 1,
+    retry_delay: float = 0.5,
 ) -> Tuple[bool, Optional[str]]:
     """
     Moves a single file to a 'finished' subfolder within dest_folder.
@@ -47,7 +51,7 @@ def move_single_file(
             error_msg = f"File in use: {e}"
             if attempt < max_retries - 1:
                 if logger:
-                    logger.warning(f"Attempt {attempt + 1}/{max_retries}: {error_msg}. Retrying in {retry_delay}s...")
+                    logger.debug(f"Attempt {attempt + 1}/{max_retries}: {error_msg}. Retrying in {retry_delay}s...")
                 time.sleep(retry_delay)
                 continue
             if logger:
@@ -57,7 +61,7 @@ def move_single_file(
             error_msg = str(e)
             if attempt < max_retries - 1:
                 if logger:
-                    logger.warning(f"Attempt {attempt + 1}/{max_retries}: {error_msg}. Retrying in {retry_delay}s...")
+                    logger.debug(f"Attempt {attempt + 1}/{max_retries}: {error_msg}. Retrying in {retry_delay}s...")
                 time.sleep(retry_delay)
                 continue
             if logger:

@@ -24,8 +24,9 @@ from PIL import Image
 from core.common.image_processing import apply_dubois_anaglyph, apply_optimized_anaglyph
 from core.common.gpu_utils import release_cuda_memory
 
-from .forward_warp import ForwardWarpStereo
+from .forward_warp import ForwardWarpStereo, build_m2s_occlusion_mask_from_disparity
 from core.common.mesh_warp import run_fusion_stereo
+from .depth_processing import process_depth_batch
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,12 @@ class PreviewRenderer:
             right_eye_raw, occlusion_mask = stereo_projector(source_resized, disp_map)
             right_eye = right_eye_raw
 
+        # Apply mask_mode for occlusion mask generation
+        mask_mode = str(settings.get("mask_type", "SC")).upper()
+        if mask_mode == "M2S":
+            occlusion_mask = build_m2s_occlusion_mask_from_disparity(disp_map, output_dtype=occlusion_mask.dtype)
+            self.logger.debug("Applied M2S occlusion mask mode")
+
         # Apply borders for anaglyph and wigglegram
         left_pct = settings.get("left_border_pct", 0.0)
         right_pct = settings.get("right_border_pct", 0.0)
@@ -446,7 +453,7 @@ class PreviewRenderer:
         """Process depth frame for preview rendering.
 
         Handles depth preprocessing including normalization, gamma correction,
-        and optional resizing for low-res previews.
+        dilation/blur, and optional resizing for low-res previews.
 
         Args:
             depth_frame: Raw depth frame tensor
@@ -505,6 +512,34 @@ class PreviewRenderer:
         if round(gamma, 2) != 1.0:
             depth_normalized = 1.0 - np.power(1.0 - depth_normalized, gamma)
             depth_normalized = np.clip(depth_normalized, 0, 1)
+
+        # Apply depth preprocessing (dilate/blur) if specified
+        dilate_x = float(settings.get("dilate_x", 0))
+        dilate_y = float(settings.get("dilate_y", 0))
+        blur_x = float(settings.get("blur_x", 0))
+        blur_y = float(settings.get("blur_y", 0))
+
+        if dilate_x != 0 or dilate_y != 0 or blur_x > 0 or blur_y > 0:
+            try:
+                # Apply using process_depth_batch (expects batch dimension)
+                depth_batch = depth_normalized[np.newaxis, :, :, np.newaxis]
+                depth_processed = process_depth_batch(
+                    batch_depth_numpy_raw=depth_batch,
+                    depth_gamma=1.0,  # Gamma already applied
+                    depth_dilate_size_x=dilate_x,
+                    depth_dilate_size_y=dilate_y,
+                    depth_blur_size_x=blur_x,
+                    depth_blur_size_y=blur_y,
+                    max_raw_value=1.0,  # Already normalized
+                    skip_preprocessing=False,
+                    debug_task_name="Preview",
+                )
+                depth_normalized = depth_processed.squeeze()
+                self.logger.debug(
+                    f"Applied depth preprocessing: dilate=({dilate_x},{dilate_y}), blur=({blur_x},{blur_y})"
+                )
+            except Exception as e:
+                self.logger.warning(f"Depth preprocessing failed: {e}")
 
         # Low-res: resize processed depth
         if is_low_res and (depth_normalized.shape[0] != H_target or depth_normalized.shape[1] != W_target):

@@ -1318,7 +1318,7 @@ QTabBar::tab:hover:!selected {
             <widget class="QLabel" name="label_gamma_value">
              <property name="minimumSize">
               <size>
-               <width>0</width>
+               <width>20</width>
                <height>0</height>
               </size>
              </property>
@@ -1363,7 +1363,7 @@ QTabBar::tab:hover:!selected {
             <widget class="QLabel" name="label_disparity_value">
              <property name="minimumSize">
               <size>
-               <width>0</width>
+               <width>20</width>
                <height>0</height>
               </size>
              </property>
@@ -1408,7 +1408,7 @@ QTabBar::tab:hover:!selected {
             <widget class="QLabel" name="label_convergence_value">
              <property name="minimumSize">
               <size>
-               <width>0</width>
+               <width>20</width>
                <height>0</height>
               </size>
              </property>
@@ -1453,7 +1453,7 @@ QTabBar::tab:hover:!selected {
             <widget class="QLabel" name="label_border_width_value">
              <property name="minimumSize">
               <size>
-               <width>0</width>
+               <width>20</width>
                <height>0</height>
               </size>
              </property>
@@ -1498,7 +1498,7 @@ QTabBar::tab:hover:!selected {
             <widget class="QLabel" name="label_bias_value">
              <property name="minimumSize">
               <size>
-               <width>0</width>
+               <width>20</width>
                <height>0</height>
               </size>
              </property>

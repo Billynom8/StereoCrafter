@@ -2,12 +2,9 @@ import sys
 import logging
 import json
 import os
-import shutil
-import struct
 import numpy as np
 import cv2
 from PySide6 import QtWidgets, QtGui, QtCore
-from PySide6.QtGui import QDoubleValidator, QIntValidator
 from core.ui.splatting_ui import Ui_MainWindow
 from core.ui.splatting_widgets import (
     InputOutputWidget,
@@ -192,12 +189,19 @@ class SplattingApp(QtWidgets.QMainWindow):
         config["multi_map"] = self.io_widget.is_multi_map()
         config["low_width"] = str(self.resolution_widget.get_low_width())
         config["low_height"] = str(self.resolution_widget.get_low_height())
+        config["enable_full_res"] = self.resolution_widget.is_full_res_enabled()
+        config["enable_low_res"] = self.resolution_widget.is_low_res_enabled()
+        config["dual_output"] = self.resolution_widget.is_dual_output()
+        config["strict_ffmpeg"] = self.resolution_widget.is_strict_ffmpeg()
+        config["high_batch"] = str(self.resolution_widget.get_full_batch_size())
+        config["low_batch"] = str(self.resolution_widget.get_low_batch_size())
         config["process_length"] = str(self.splatting_widget.get_process_length())
         config["slider_disparity"] = self.stereo_widget.get_disparity()
         config["slider_convergence"] = self.stereo_widget.get_convergence()
         config["slider_gamma"] = self.stereo_widget.get_gamma()
         config["slider_border_width"] = self.stereo_widget.get_border_width()
         config["slider_bias"] = self.stereo_widget.get_border_bias()
+        config["cross_view"] = self.stereo_widget.is_cross_view()
         config["preview_scale"] = self.preview_widget.get_scale()
         config["debug_logging"] = self.ui.action_debug.isChecked()
         config["auto_update_sidecar"] = self.ui.action_auto_update_sidecar.isChecked()
@@ -225,6 +229,12 @@ class SplattingApp(QtWidgets.QMainWindow):
             self.io_widget.set_multi_map(config.get("multi_map", False))
             self.resolution_widget.set_low_width(config.get("low_width", 640))
             self.resolution_widget.set_low_height(config.get("low_height", 320))
+            self.resolution_widget.set_full_res_enabled(config.get("enable_full_res", True))
+            self.resolution_widget.set_low_res_enabled(config.get("enable_low_res", True))
+            self.resolution_widget.set_dual_output(config.get("dual_output", False))
+            self.resolution_widget.set_strict_ffmpeg(config.get("strict_ffmpeg", False))
+            self.resolution_widget.set_full_batch_size(config.get("high_batch", 10))
+            self.resolution_widget.set_low_batch_size(config.get("low_batch", 50))
             self.splatting_widget.set_process_length(config.get("process_length", 0))
             self.splatting_widget.set_mesh_extrusion(config.get("mesh_extrusion", 0.5))
             self.splatting_widget.set_mesh_density(config.get("mesh_density", 0.5))
@@ -242,6 +252,7 @@ class SplattingApp(QtWidgets.QMainWindow):
                 self.stereo_widget.set_gamma(config.get("gamma", 1.0))
                 self.stereo_widget.set_border_width(val("border_width", 0))
                 self.stereo_widget.set_border_bias(config.get("border_bias", 0.5))
+                self.stereo_widget.set_cross_view(config.get("cross_view", False))
                 self.depth_widget.set_dilate_x(val("dilate_x", 12))
                 self.depth_widget.set_dilate_y(config.get("dilate_y", 3))
                 self.depth_widget.set_blur_x(val("blur_x", 5))
@@ -285,6 +296,11 @@ class SplattingApp(QtWidgets.QMainWindow):
 
         self.video_list_widget.load_clicked.connect(self.load_videos)
 
+        # Connect value_changed signals to refresh preview and clear buffer
+        self.stereo_widget.value_changed.connect(self._on_param_changed)
+        self.depth_widget.value_changed.connect(self._on_param_changed)
+        self.splatting_widget.value_changed.connect(self._on_param_changed)
+
         self.ui.comboBox_preview_source.currentTextChanged.connect(self._on_preview_source_changed)
         self.ui.spinBox_ff_speed.valueChanged.connect(self.update_playback_speed)
         self.ui.lineEdit_jump_to.editingFinished.connect(self.on_jump_to_clip)
@@ -305,6 +321,13 @@ class SplattingApp(QtWidgets.QMainWindow):
         self.ui.action_load_fsexport.triggered.connect(self.on_load_fsexport)
 
     def _on_preview_source_changed(self, mode):
+        self._request_render(self.preview_widget.get_frame())
+
+    def _on_param_changed(self):
+        """Handle parameter changes from stereo/depth widgets - refresh preview."""
+        # Clear the buffer to force re-render with new params
+        self.controller.buffer.clear()
+        # Re-render current frame
         self._request_render(self.preview_widget.get_frame())
 
     def on_jump_to_clip(self):
@@ -626,7 +649,7 @@ class SplattingApp(QtWidgets.QMainWindow):
             logger.error(f"Failed to load settings: {e}")
 
     def on_save_settings(self):
-        config = self.get_params()
+        # config = self.get_params()
         self.save_config()
         self.processing_widget.set_status("Settings saved.")
 
@@ -858,7 +881,7 @@ class SplattingApp(QtWidgets.QMainWindow):
             grid = payload.get("grid")
             task_name = payload.get("task_name", "render")
             test_type = payload.get("test_type", "splat")
-            task_suffix = payload.get("task_suffix", "")
+            # task_suffix = payload.get("task_suffix", "")
 
             if grid is None:
                 return
@@ -907,7 +930,7 @@ class SplattingApp(QtWidgets.QMainWindow):
 
                 # Get the raw image data - Qt stores as BGRA
                 # Convert to bytes and reshape
-                img_size = preview_img.sizeInBytes()
+                # img_size = preview_img.sizeInBytes()
                 ptr = preview_img.bits()
 
                 # Create numpy array from the image data

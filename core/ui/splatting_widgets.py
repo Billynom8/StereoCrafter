@@ -214,15 +214,27 @@ class StereoProjectionWidget(QtWidgets.QWidget):
         self._connect_signals()
 
     def _connect_signals(self):
-        self.ui.horizontalSlider_disparity.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_convergence.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_gamma.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_border_width.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_border_bias.valueChanged.connect(self._on_change)
+        # Use sliderReleased to avoid lag during drag
+        # Labels still update in real-time for visual feedback
+        self.ui.horizontalSlider_disparity.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_convergence.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_gamma.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_border_width.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_border_bias.valueChanged.connect(self.update_labels)
 
-    def _on_change(self, value):
+        # Emit value_changed only on slider release to trigger re-render
+        self.ui.horizontalSlider_disparity.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_convergence.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_gamma.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_border_width.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_border_bias.sliderReleased.connect(self._on_slider_release)
+
+        # Cross view checkbox triggers immediate refresh
+        self.ui.checkBox_cross_view.toggled.connect(self._on_slider_release)
+
+    def _on_slider_release(self):
+        """Emit value_changed when slider is released or checkbox toggled."""
         self.value_changed.emit()
-        self.update_labels()
 
     def init_ui_defaults(self):
         self.ui.horizontalSlider_border_bias.setMinimum(0)
@@ -291,14 +303,27 @@ class DepthPreprocessingWidget(QtWidgets.QWidget):
         self._connect_signals()
 
     def _connect_signals(self):
-        self.ui.horizontalSlider_dilate_x.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_dilate_y.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_blur_x.valueChanged.connect(self._on_change)
-        self.ui.horizontalSlider_blur_y.valueChanged.connect(self._on_change)
+        # Use sliderReleased for depth preprocessing to avoid lag during drag
+        # Labels still update in real-time via valueChanged for visual feedback
+        self.ui.horizontalSlider_dilate_x.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_dilate_y.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_blur_x.valueChanged.connect(self.update_labels)
+        self.ui.horizontalSlider_blur_y.valueChanged.connect(self.update_labels)
 
-    def _on_change(self, value):
+        # Emit value_changed only on slider release to trigger re-render
+        self.ui.horizontalSlider_dilate_x.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_dilate_y.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_blur_x.sliderReleased.connect(self._on_slider_release)
+        self.ui.horizontalSlider_blur_y.sliderReleased.connect(self._on_slider_release)
+
+        self.ui.lineEdit_blur_bias.editingFinished.connect(self._on_blur_bias_change)
+
+    def _on_slider_release(self):
+        """Emit value_changed when slider is released."""
         self.value_changed.emit()
-        self.update_labels()
+
+    def _on_blur_bias_change(self):
+        self.value_changed.emit()
 
     def update_labels(self):
         self.ui.label_dilate_x_value.setText(str(self.ui.horizontalSlider_dilate_x.value()))
@@ -352,9 +377,13 @@ class SplattingSettingsWidget(QtWidgets.QWidget):
         self.ui.comboBox_mask_type.setCurrentText("SC")
 
     def _connect_signals(self):
-        pass
+        self.ui.comboBox_mask_type.currentTextChanged.connect(self._on_change)
+        self.ui.lineEdit_mesh_extrusion.editingFinished.connect(self._on_change)
+        self.ui.lineEdit_mesh_density.editingFinished.connect(self._on_change)
+        self.ui.lineEdit_mesh_bias.editingFinished.connect(self._on_change)
+        self.ui.lineEdit_mesh_dolly.editingFinished.connect(self._on_change)
 
-    def _on_change(self, value):
+    def _on_change(self, value=None):
         self.value_changed.emit()
 
     def get_process_length(self):
