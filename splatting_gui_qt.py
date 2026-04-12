@@ -202,6 +202,7 @@ class SplattingApp(QtWidgets.QMainWindow):
         config["slider_border_width"] = self.stereo_widget.get_border_width()
         config["slider_bias"] = self.stereo_widget.get_border_bias()
         config["cross_view"] = self.stereo_widget.is_cross_view()
+        config["resume"] = self.stereo_widget.is_resume_enabled()
         config["preview_scale"] = self.preview_widget.get_scale()
         config["debug_logging"] = self.ui.action_debug.isChecked()
         config["auto_update_sidecar"] = self.ui.action_auto_update_sidecar.isChecked()
@@ -253,6 +254,7 @@ class SplattingApp(QtWidgets.QMainWindow):
                 self.stereo_widget.set_border_width(val("border_width", 0))
                 self.stereo_widget.set_border_bias(config.get("border_bias", 0.5))
                 self.stereo_widget.set_cross_view(config.get("cross_view", False))
+                self.stereo_widget.set_resume_enabled(config.get("resume", False))
                 self.depth_widget.set_dilate_x(val("dilate_x", 12))
                 self.depth_widget.set_dilate_y(config.get("dilate_y", 3))
                 self.depth_widget.set_blur_x(val("blur_x", 5))
@@ -596,7 +598,7 @@ class SplattingApp(QtWidgets.QMainWindow):
             low_res_batch_size=self.resolution_widget.get_low_batch_size(),
             dual_output=self.resolution_widget.is_dual_output(),
             strict_ffmpeg_decode=self.resolution_widget.is_strict_ffmpeg(),
-            move_to_finished=True,
+            move_to_finished=self.stereo_widget.is_resume_enabled(),
             sidecar_folder=self.io_widget.get_sidecar_path(),
             multi_map=self.io_widget.is_multi_map(),
             depth_dilate_size_x=self.depth_widget.get_dilate_x(),
@@ -605,7 +607,9 @@ class SplattingApp(QtWidgets.QMainWindow):
             depth_blur_size_y=self.depth_widget.get_blur_y(),
             mask_mode=self.splatting_widget.get_mask_type(),
             is_test_mode=self.dev_tools_widget.is_splat_test() or self.dev_tools_widget.is_map_test(),
-            test_target_frame_idx=self.preview_widget.get_frame(),
+            test_target_frame_idx=self.preview_widget.get_frame()
+            if self.dev_tools_widget.is_splat_test() or self.dev_tools_widget.is_map_test()
+            else None,
             test_type="map" if self.dev_tools_widget.is_map_test() else "splat",
         )
         return settings
@@ -617,6 +621,12 @@ class SplattingApp(QtWidgets.QMainWindow):
         self._enable_inputs(False)
         self.batch_controller.stop_event.clear()
         settings = self._get_processing_settings()
+        logger.info(
+            f"[DEBUG] Starting batch with test_target_frame_idx={settings.test_target_frame_idx}, is_test_mode={settings.is_test_mode}"
+        )
+        logger.info(
+            f"[DEBUG] full_res_batch_size={settings.full_res_batch_size}, low_res_batch_size={settings.low_res_batch_size}"
+        )
         self.batch_controller.start_batch(settings)
         self._processing_timer.start(100)
 

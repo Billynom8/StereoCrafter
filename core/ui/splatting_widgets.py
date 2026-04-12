@@ -1,15 +1,44 @@
 import logging
+import os
 from PySide6 import QtWidgets, QtCore
 from PySide6.QtGui import QDoubleValidator, QIntValidator
 
 logger = logging.getLogger(__name__)
 
 
+class DropFilter(QtCore.QObject):
+    """Event filter that enables drag-and-drop on any widget."""
+
+    files_dropped = QtCore.Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.DragEnter:
+            if event.mimeData().hasUrls():
+                event.acceptProposedAction()
+                return True
+        elif event.type() == QtCore.QEvent.Type.DragLeave:
+            return True
+        elif event.type() == QtCore.QEvent.Type.Drop:
+            urls = event.mimeData().urls()
+            paths = [url.toLocalFile() for url in urls]
+            if paths:
+                self.files_dropped.emit(paths)
+            return True
+        return super().eventFilter(obj, event)
+
+
 class InputOutputWidget(QtWidgets.QWidget):
+    depth_file_dropped = QtCore.Signal(str)  # Signal for depth file drops to bypass suffix filter
+
     def __init__(self, ui, parent=None):
         super().__init__(parent)
         self.ui = ui
+        self._drop_filters = {}  # Store filters to prevent garbage collection
         self._setup_validators()
+        self._enable_drag_drop()
         self._connect_signals()
 
     def _setup_validators(self):
@@ -18,16 +47,139 @@ class InputOutputWidget(QtWidgets.QWidget):
         self.ui.lineEdit_mesh_bias.setValidator(QDoubleValidator(-1.0, 1.0, 3, self))
         self.ui.lineEdit_mesh_dolly.setValidator(QDoubleValidator(0.0, 100.0, 3, self))
 
-    def _connect_signals(self):
-        self.ui.pushButton_browse_source.clicked.connect(lambda: self._browse_folder(self.ui.lineEdit_input_source))
-        self.ui.pushButton_browse_depth.clicked.connect(lambda: self._browse_folder(self.ui.lineEdit_input_depth))
-        self.ui.pushButton_browse_output.clicked.connect(lambda: self._browse_folder(self.ui.lineEdit_output_splatted))
-        self.ui.pushButton_browse_sidecar.clicked.connect(lambda: self._browse_folder(self.ui.lineEdit_inout_sidecar))
+    def _install_drop_filter(self, widget, callback):
+        """Install a drop event filter on a widget."""
+        widget.setAcceptDrops(True)
+        drop_filter = DropFilter(widget)
+        drop_filter.files_dropped.connect(callback)
+        widget.installEventFilter(drop_filter)
+        self._drop_filters[widget] = drop_filter
+        return drop_filter
 
-    def _browse_folder(self, line_edit):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory")
+    def _enable_drag_drop(self):
+        """Enable drag-drop on line edits and buttons."""
+        # Enable on line edits
+        self._install_drop_filter(self.ui.lineEdit_input_source, self._on_source_dropped)
+        self._install_drop_filter(self.ui.lineEdit_input_depth, self._on_depth_dropped)
+        self._install_drop_filter(self.ui.lineEdit_output_splatted, self._on_output_dropped)
+        self._install_drop_filter(self.ui.lineEdit_inout_sidecar, self._on_sidecar_dropped)
+
+        # Enable on browse buttons
+        self._install_drop_filter(self.ui.pushButton_browse_source, self._on_source_dropped)
+        self._install_drop_filter(self.ui.pushButton_select_source, self._on_source_dropped)
+        self._install_drop_filter(self.ui.pushButton_browse_depth, self._on_depth_dropped)
+        self._install_drop_filter(self.ui.pushButton_select_depth, self._on_depth_dropped)
+        self._install_drop_filter(self.ui.pushButton_browse_output, self._on_output_dropped)
+        self._install_drop_filter(self.ui.pushButton_browse_sidecar, self._on_sidecar_dropped)
+
+    def _on_source_dropped(self, paths):
+        """Handle dropped source path(s)."""
+        if paths:
+            path = paths[0]
+            if os.path.isfile(path):
+                path = os.path.dirname(path)
+            self.ui.lineEdit_input_source.setText(path)
+            logger.info(f"Source path set via drop: {path}")
+
+    def _on_depth_dropped(self, paths):
+        """Handle dropped depth path(s). Emit signal to bypass suffix filter if file."""
+        if paths:
+            path = paths[0]
+            if os.path.isfile(path):
+                # Emit signal for file drop to bypass suffix filter
+                self.depth_file_dropped.emit(path)
+                self.ui.lineEdit_input_depth.setText(path)
+                logger.info(f"Depth file set via drop (bypasses suffix filter): {path}")
+            else:
+                self.ui.lineEdit_input_depth.setText(path)
+                logger.info(f"Depth folder set via drop: {path}")
+
+    def _on_output_dropped(self, paths):
+        """Handle dropped output path(s). Extract directory if file."""
+        if paths:
+            path = paths[0]
+            if os.path.isfile(path):
+                path = os.path.dirname(path)
+            self.ui.lineEdit_output_splatted.setText(path)
+            logger.info(f"Output path set via drop: {path}")
+
+    def _on_sidecar_dropped(self, paths):
+        """Handle dropped sidecar path(s). Extract directory if file."""
+        if paths:
+            path = paths[0]
+            if os.path.isfile(path):
+                path = os.path.dirname(path)
+            self.ui.lineEdit_inout_sidecar.setText(path)
+            logger.info(f"Sidecar path set via drop: {path}")
+
+    def _connect_signals(self):
+        # Browse buttons - use current path as starting directory
+        self.ui.pushButton_browse_source.clicked.connect(self._browse_source)
+        self.ui.pushButton_browse_depth.clicked.connect(self._browse_depth)
+        self.ui.pushButton_browse_output.clicked.connect(self._browse_output)
+        self.ui.pushButton_browse_sidecar.clicked.connect(self._browse_sidecar)
+
+        # Select file buttons
+        self.ui.pushButton_select_source.clicked.connect(self._select_source_file)
+        self.ui.pushButton_select_depth.clicked.connect(self._select_depth_file)
+
+    def _get_start_dir(self, line_edit):
+        """Get starting directory from line edit, fallback to workspace if invalid."""
+        path = line_edit.text()
+        if path:
+            if os.path.isfile(path):
+                return os.path.dirname(path)
+            if os.path.isdir(path):
+                return path
+        return "./workspace"
+
+    def _browse_source(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Source Directory", self._get_start_dir(self.ui.lineEdit_input_source)
+        )
         if folder:
-            line_edit.setText(folder)
+            self.ui.lineEdit_input_source.setText(folder)
+
+    def _browse_depth(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Depth Directory", self._get_start_dir(self.ui.lineEdit_input_depth)
+        )
+        if folder:
+            self.ui.lineEdit_input_depth.setText(folder)
+
+    def _browse_output(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Output Directory", self._get_start_dir(self.ui.lineEdit_output_splatted)
+        )
+        if folder:
+            self.ui.lineEdit_output_splatted.setText(folder)
+
+    def _browse_sidecar(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Sidecar Directory", self._get_start_dir(self.ui.lineEdit_inout_sidecar)
+        )
+        if folder:
+            self.ui.lineEdit_inout_sidecar.setText(folder)
+
+    def _select_source_file(self):
+        start_dir = self._get_start_dir(self.ui.lineEdit_input_source)
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Source Video File", start_dir, "Video Files (*.mp4 *.mkv *.avi *.mov *.webm);;All Files (*)"
+        )
+        if file_path:
+            self.ui.lineEdit_input_source.setText(file_path)
+            logger.info(f"Source file selected: {file_path}")
+
+    def _select_depth_file(self):
+        start_dir = self._get_start_dir(self.ui.lineEdit_input_depth)
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select Depth Map File", start_dir, "Depth Files (*_depth.* *.exr *.png);;All Files (*)"
+        )
+        if file_path:
+            # Emit signal to bypass suffix filter
+            self.depth_file_dropped.emit(file_path)
+            self.ui.lineEdit_input_depth.setText(file_path)
+            logger.info(f"Depth file selected (bypasses suffix filter): {file_path}")
 
     def get_source_path(self):
         return self.ui.lineEdit_input_source.text()
@@ -292,6 +444,14 @@ class StereoProjectionWidget(QtWidgets.QWidget):
 
     def set_cross_view(self, enabled):
         self.ui.checkBox_cross_view.setChecked(enabled)
+
+    def is_resume_enabled(self):
+        """Returns whether the Resume (move to finished) checkbox is checked."""
+        return self.ui.checkBox_resume.isChecked()
+
+    def set_resume_enabled(self, enabled):
+        """Set the Resume (move to finished) checkbox state."""
+        self.ui.checkBox_resume.setChecked(enabled)
 
 
 class DepthPreprocessingWidget(QtWidgets.QWidget):
