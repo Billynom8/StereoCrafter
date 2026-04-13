@@ -362,73 +362,73 @@ class RenderProcessor:
                     skip_preprocessing=skip_lowres_preproc and is_low_res_task,
                 )
 
-            # Normalize back to 0-1 after processing
-            batch_depth_numpy_float = batch_depth_processed / max(max_expected_raw_value, 1.0)
-            batch_depth_numpy_float = np.clip(batch_depth_numpy_float, 0.0, 1.0)
+                # Normalize back to 0-1 after processing
+                batch_depth_numpy_float = batch_depth_processed / max(max_expected_raw_value, 1.0)
+                batch_depth_numpy_float = np.clip(batch_depth_numpy_float, 0.0, 1.0)
 
-            # 4. GPU Splatting
-            batch_processed_frames = self._process_gpu_splatting(
-                stereo_projector=stereo_projector,
-                batch_video_numpy=batch_video_numpy,
-                batch_depth_numpy_float=batch_depth_numpy_float,
-                target_width=width,
-                target_height=height,
-                max_disp=max_disp,
-                zero_disparity_anchor_val=zero_disparity_anchor_val,
-                input_bias=input_bias,
-                tv_disp_comp=tv_disp_comp,
-                mask_mode=mask_mode,
-            )
-
-            # Debug logging for comparison
-            logger.debug(
-                f"[BATCH COMPARE] max_disp={max_disp}, convergence={zero_disparity_anchor_val}, input_bias={input_bias}"
-            )
-            logger.debug(
-                f"[BATCH COMPARE] depth_gamma={depth_gamma}, dilate_x={depth_dilate_size_x}, dilate_y={depth_dilate_size_y}"
-            )
-
-            # 5. Handle results (diag tests or FFmpeg write)
-            if is_test_mode and test_target_frame_idx is not None:
-                # Construct diagnostic output path - save to main output dir (not subfolders)
-                output_dir_main = (
-                    os.path.dirname(os.path.dirname(output_video_path_base)) if output_video_path_base else None
-                )
-                video_name_base = (
-                    os.path.basename(output_video_path_base).replace(".mp4", "") if output_video_path_base else "test"
+                # 4. GPU Splatting
+                batch_processed_frames = self._process_gpu_splatting(
+                    stereo_projector=stereo_projector,
+                    batch_video_numpy=batch_video_numpy,
+                    batch_depth_numpy_float=batch_depth_numpy_float,
+                    target_width=width,
+                    target_height=height,
+                    max_disp=max_disp,
+                    zero_disparity_anchor_val=zero_disparity_anchor_val,
+                    input_bias=input_bias,
+                    tv_disp_comp=tv_disp_comp,
+                    mask_mode=mask_mode,
                 )
 
-                # Determine task suffix for filename
-                task_suffix = ""
-                if task_name.lower() in ("hires", "full", "fullres"):
-                    task_suffix = "_hi"
-                elif task_name.lower() in ("lowres", "low"):
-                    task_suffix = "_low"
-
-                test_output_path = (
-                    os.path.join(output_dir_main, f"{video_name_base}{task_suffix}_test.png")
-                    if output_dir_main
-                    else None
+                # Debug logging for comparison
+                logger.debug(
+                    f"[BATCH COMPARE] max_disp={max_disp}, convergence={zero_disparity_anchor_val}, input_bias={input_bias}"
                 )
-                self._handle_diagnostic_capture(
-                    batch_processed_frames, dual_output, task_name, test_output_path, test_type, task_suffix
+                logger.debug(
+                    f"[BATCH COMPARE] depth_gamma={depth_gamma}, dilate_x={depth_dilate_size_x}, dilate_y={depth_dilate_size_y}"
                 )
-            elif ffmpeg_process:
-                if use_dnxhr_split and mask_process and splat_process:
-                    self._write_split_to_ffmpeg(mask_process, splat_process, batch_processed_frames)
-                else:
-                    self._write_to_ffmpeg(ffmpeg_process, batch_processed_frames, dual_output)
 
-                    frame_count += len(batch_indices)
-                    self.progress_queue.put(("processed", frame_count))
-                    if not is_test_mode:
-                        draw_progress_bar(
-                            frame_count, total_frames_to_process, suffix=f"{task_name} Batch {i // batch_size}"
-                        )
+                # 5. Handle results (diag tests or FFmpeg write)
+                if is_test_mode and test_target_frame_idx is not None:
+                    # Construct diagnostic output path - save to main output dir (not subfolders)
+                    output_dir_main = (
+                        os.path.dirname(os.path.dirname(output_video_path_base)) if output_video_path_base else None
+                    )
+                    video_name_base = (
+                        os.path.basename(output_video_path_base).replace(".mp4", "") if output_video_path_base else "test"
+                    )
 
-                    # Cleanup batch
-                    del batch_video_numpy, batch_depth_numpy_raw, batch_depth_numpy_float, batch_processed_frames
-                    release_cuda_memory()
+                    # Determine task suffix for filename
+                    task_suffix = ""
+                    if task_name.lower() in ("hires", "full", "fullres"):
+                        task_suffix = "_hi"
+                    elif task_name.lower() in ("lowres", "low"):
+                        task_suffix = "_low"
+
+                    test_output_path = (
+                        os.path.join(output_dir_main, f"{video_name_base}{task_suffix}_test.png")
+                        if output_dir_main
+                        else None
+                    )
+                    self._handle_diagnostic_capture(
+                        batch_processed_frames, dual_output, task_name, test_output_path, test_type, task_suffix
+                    )
+                elif ffmpeg_process:
+                    if use_dnxhr_split and mask_process and splat_process:
+                        self._write_split_to_ffmpeg(mask_process, splat_process, batch_processed_frames)
+                    else:
+                        self._write_to_ffmpeg(ffmpeg_process, batch_processed_frames, dual_output)
+
+                frame_count += len(batch_indices)
+                self.progress_queue.put(("processed", frame_count))
+                if not is_test_mode:
+                    draw_progress_bar(
+                        frame_count, total_frames_to_process, suffix=f"{task_name} Batch {i // batch_size}"
+                    )
+
+                # Cleanup batch
+                del batch_video_numpy, batch_depth_numpy_raw, batch_depth_numpy_float, batch_processed_frames
+                release_cuda_memory()
 
         except Exception as e:
             logger.error(f"Render error: {e}", exc_info=True)
